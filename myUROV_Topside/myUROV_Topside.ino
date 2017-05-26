@@ -18,7 +18,7 @@
 #define LED_PS			7
 #define LED_WI_Alarm	6
 
-//global data
+//global data for LCD TFT
 TFT myTFT = TFT(cs, dc, rst);	//create an instance of the TFT class
 
 ////////////////////////////////////////////////////
@@ -149,7 +149,7 @@ void setup()
 	digitalWrite(LED_PS, HIGH);
 }
 
-//variables to define how often to refresh info on the screen
+//global data to define how often to refresh info on the screen
 unsigned long runtime_timestamp = 0;
 unsigned long time_timestamp = 0;
 boolean runtimeFlag = true;
