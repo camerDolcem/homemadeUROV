@@ -1,20 +1,25 @@
 /*
   UROV v1
 
+  Topside controller
+
   Created in 2017 by JK
   */
 
 #include <TFT.h>  // Arduino LCD TFT library
 #include <DS1307RTC.h>
 
-// pin definition for Uno for TFT screen
+//pin definition for Uno for TFT screen
 #define cs   10
 #define dc   9
 #define rst  8 
 
+//pin definition for LEDs
+#define LED_PS			7
+#define LED_WI_Alarm	6
 
+//global data
 TFT myTFT = TFT(cs, dc, rst);	//create an instance of the TFT class
-
 
 ////////////////////////////////////////////////////
 //display runtime
@@ -138,6 +143,10 @@ void setup()
 
 	//display date
 	dispDate();
+
+	//light Power Supply LED
+	pinMode(LED_PS, OUTPUT);
+	digitalWrite(LED_PS, HIGH);
 }
 
 //variables to define how often to refresh info on the screen
