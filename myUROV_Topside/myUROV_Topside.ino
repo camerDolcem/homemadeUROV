@@ -6,15 +6,15 @@
   Created in 2017 by JK
   */
 
-#include <TFT.h>  // Arduino LCD TFT library
-#include <DS1307RTC.h>
+#include <TFT.h>							//LCD TFT library
+#include <DS1307RTC.h>						//RTC library
 
-//pin definition for Uno for TFT screen
+//pins definition for Uno for TFT screen
 #define cs   10
 #define dc   9
 #define rst  8 
 
-//pin definition for LEDs
+//pins definition for LEDs
 #define LED_PS			7
 #define LED_WI_Alarm	6
 
@@ -125,9 +125,9 @@ void dispDate()
 //setup
 void setup()
 {	
-	// initiate LCD and make bg black
-	myTFT.begin();
-	myTFT.background(0, 0, 0);
+	//display
+	myTFT.begin();							//initiate LCD
+	myTFT.background(0, 0, 0);				//black background
 
 	//display runtime related static text
 	myTFT.setTextSize(1);
@@ -148,6 +148,7 @@ void setup()
 	pinMode(LED_PS, OUTPUT);
 	digitalWrite(LED_PS, HIGH);
 }
+
 
 //global data to define how often to refresh info on the screen
 unsigned long runtime_timestamp = 0;
