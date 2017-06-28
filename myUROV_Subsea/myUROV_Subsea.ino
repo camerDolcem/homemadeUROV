@@ -11,9 +11,24 @@
 //pins definition for 1-Wire bus
 #define ONE_WIRE_BUS 2
 
+//pins definition for water detection sensor
+#define pin_WI A7
+
 //global data for 1-Wire
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
+
+
+////////////////////////////////////////////////////
+//get temperature measurement
+void Temperature()
+{
+	sensors.requestTemperatures();
+	float tempC = sensors.getTempCByIndex(0);
+	Serial.print(tempC); //del later
+	//Serial.print(char(176)); //del later
+	Serial.println("degC");
+}
 
 
 ////////////////////////////////////////////////////
@@ -23,7 +38,10 @@ void setup()
 	//1-Wire
 	sensors.begin();						//locate device(s) on the bus
 
-	Serial.begin(9600); 
+	//water ingress
+	pinMode(pin_WI, INPUT);
+
+	Serial.begin(9600); //del later
 }
 
 //global data to define how often to retrieve data
@@ -40,21 +58,16 @@ void loop()
 
 	if (tempFlag)
 		{
-			printTemperature();			
-
+			Temperature();			
+			unsigned int liquid_level = analogRead(pin_WI);
+			Serial.print(liquid_level);
+			Serial.println(" of water");
 			timestamp = millis();
 			tempFlag = false;
 		}
 }
 
-void printTemperature()
-{
-	sensors.requestTemperatures();
-	float tempC = sensors.getTempCByIndex(0);
-	Serial.print(tempC);
-	//Serial.print(char(176));
-	Serial.print("degC\n");
-}
+
 
 
 

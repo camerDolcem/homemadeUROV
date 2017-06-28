@@ -15,8 +15,8 @@
 #define rst  8 
 
 //pins definition for LEDs
-#define LED_PS			7
-#define LED_WI_Alarm	6
+#define pin_LED_PS			7
+#define pin_LED_WI_Alarm	6
 
 //global data for LCD TFT
 TFT myTFT = TFT(cs, dc, rst);	//create an instance of the TFT class
@@ -145,8 +145,8 @@ void setup()
 	dispDate();
 
 	//light Power Supply LED
-	pinMode(LED_PS, OUTPUT);
-	digitalWrite(LED_PS, HIGH);
+	pinMode(pin_LED_PS, OUTPUT);
+	digitalWrite(pin_LED_PS, HIGH);
 }
 
 
