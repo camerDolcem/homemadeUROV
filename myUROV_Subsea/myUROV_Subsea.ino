@@ -48,13 +48,17 @@ byte waterIngress()
 //get pressure measurement
 int Pressure()
 {
-	unsigned int water_pressure_read[3] = {0, 0, 0};
+	int water_pressure = 0;
+	const byte counter = 5;
+	unsigned int water_pressure_read[counter];
 
-	for (int i = 1; i < 4; i++)
-		water_pressure_read[i] = analogRead(pin_PR);
-
-	int water_pressure = (water_pressure_read[1] + water_pressure_read[2] + water_pressure_read[3]) / 3;
-	water_pressure = map(water_pressure, 102, 922, 0, 12000);	//max measured vertical ingress level is 40mm 
+	for (byte i = 1; i <= counter; i++)
+		{
+			water_pressure_read[i] = analogRead(pin_PR);
+			water_pressure += water_pressure_read[i];
+		}
+		
+	water_pressure = map((water_pressure / counter), 102, 922, 0, 12000);	//max measured vertical ingress level is 40mm 
 
 	return water_pressure;
 }
