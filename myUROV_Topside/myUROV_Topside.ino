@@ -16,7 +16,7 @@
 
 //pins definition for LEDs
 #define pin_LED_PS			7
-#define pin_LED_WI_Alarm	6
+#define pin_LED_WI_Alarm	6 //if over AI 200
 
 //global data for LCD TFT
 TFT myTFT = TFT(cs, dc, rst);	//create an instance of the TFT class
