@@ -55,10 +55,12 @@ int Pressure()
 	for (byte i = 1; i <= counter; i++)
 		{
 			water_pressure_read[i] = analogRead(pin_PR);
+			if (water_pressure_read[i] < 0)
+				water_pressure_read[i] = 0;
 			water_pressure += water_pressure_read[i];
 		}
 		
-	water_pressure = map((water_pressure / counter), 102, 922, 0, 12000);	//max measured vertical ingress level is 40mm 
+	water_pressure = map((water_pressure / counter), 102, 922, 0, 12000);	//max measured water pressure is 12 000hPa 
 
 	return water_pressure;
 }
@@ -68,7 +70,7 @@ int Pressure()
 //setup
 void setup()
 {	
-	//1-Wire
+	//1-Wire sensors
 	sensors.begin();						//locate devices on the bus
 
 	//water ingress
@@ -88,13 +90,13 @@ boolean tempFlag = true;
 void loop()
 {
 	//set flag for update of temp value retrieval (in ms)
-	if (millis() - timestamp >= 500)
+	if (millis() - timestamp >= 3000)
 		tempFlag = true;
 
 	if (tempFlag)
 		{
 			Serial.print("Temperature: ");
-			Serial.print(Temperature(), 1);
+			Serial.print(Temperature(), 2);
 			Serial.println(" (degC)");
 
 			Serial.print("Water pressure: ");

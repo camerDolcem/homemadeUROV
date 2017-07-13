@@ -8,6 +8,7 @@
 
 #include <TFT.h>							//LCD TFT library
 #include <DS1307RTC.h>						//RTC library
+#include <Adafruit_BMP280.h>				//air pressure and temperature library
 
 //pins definition for Uno for TFT screen
 #define cs   10
@@ -19,7 +20,10 @@
 #define pin_LED_WI_Alarm	6 //if over AI 200
 
 //global data for LCD TFT
-TFT myTFT = TFT(cs, dc, rst);	//create an instance of the TFT class
+TFT myTFT = TFT(cs, dc, rst);				//create an instance
+
+//global data for BMP280 sensor
+Adafruit_BMP280 BMP;						//create an instance
 
 ////////////////////////////////////////////////////
 //display runtime
@@ -33,6 +37,7 @@ void dispRuntime()
 	timer = timer - timerMin * 60;			//s only (on top of minutes)
 	timerMin = timerMin - timerHrs * 60;	//min only (on top of hours)
 
+	myTFT.setTextSize(1);
 	myTFT.setTextColor(ST7735_GREEN);
 	myTFT.setCursor(50, 153);
 	myTFT.print(timerHrs);
@@ -57,11 +62,12 @@ void eraseRuntime()
 //display current time from RTC
 void dispTime() 
 {
-	tmElements_t tm;				//create an instance of the tmElements_t class
+	tmElements_t tm;						//create an instance of the tmElements_t class
 
 	if (RTC.read(tm)) 
 	{ 
 		//hour
+		myTFT.setTextSize(1);
 		myTFT.setCursor(10, 0);
 		myTFT.setTextColor(ST7735_CYAN);
 		if (tm.Hour >= 0 && tm.Hour < 10)
@@ -92,7 +98,7 @@ void eraseTime()
 //display current date from RTC
 void dispDate()
 {
-	tmElements_t tm;				//create an instance of the tmElements_t class
+	tmElements_t tm;						//create an instance of the tmElements_t class
 
 	if (RTC.read(tm))
 	{		
@@ -122,11 +128,42 @@ void dispDate()
 
 
 ////////////////////////////////////////////////////
+//display air pressure and temperature
+void dispTempPress()
+{
+	float pressure = BMP.readPressure() / 100;
+	float temperature = BMP.readTemperature();
+
+	//temperature
+	myTFT.setTextSize(3);
+	myTFT.setCursor(10, 80);
+	myTFT.setTextColor(ST7735_WHITE);
+	myTFT.print(temperature, 1);
+
+	//pressure
+	myTFT.setTextSize(2);
+	myTFT.setCursor(10, 35);
+	myTFT.print(pressure, 0);
+}
+
+
+////////////////////////////////////////////////////
+//erase air temperature and pressure
+void eraseTempPress()
+{
+	//temperature	
+	myTFT.fillRect(10, 80, 70, 22, ST7735_BLACK);
+	//pressure
+	myTFT.fillRect(10, 35, 55, 14, ST7735_BLACK);
+}
+
+
+////////////////////////////////////////////////////
 //setup
 void setup()
 {	
 	//display
-	myTFT.begin();							//initiate LCD
+	myTFT.begin();							//initialise LCD
 	myTFT.background(0, 0, 0);				//black background
 
 	//display runtime related static text
@@ -143,6 +180,23 @@ void setup()
 
 	//display date
 	dispDate();
+
+	//display 'degC'
+	myTFT.setTextSize(2);
+	myTFT.setCursor(90, 75);
+	myTFT.setTextColor(0x2e8b);
+	myTFT.print(F("o"));
+	myTFT.setTextSize(3);
+	myTFT.setCursor(105, 80);
+	myTFT.print(F("C"));
+
+	//display 'hPa'
+	myTFT.setTextSize(2);
+	myTFT.setCursor(65, 35);
+	myTFT.print(F("hPa"));
+
+	//initialise BMP280 sensor
+	BMP.begin();
 
 	//light Power Supply LED
 	pinMode(pin_LED_PS, OUTPUT);
@@ -166,13 +220,17 @@ void loop()
 		runtimeFlag = true;
 
 	//set flag for the time to elapse before another update of value displayed (in ms)
-	if (millis() - time_timestamp >= 5000)
+	if (millis() - time_timestamp >= 3000)
 		timeFlag = true;
 
 	if (timeFlag)
 		{
 			eraseTime();					//erase current time
 			dispTime();						//display current time
+			
+			eraseTempPress();				//erase temperature and pressure
+			dispTempPress();				//display current t
+			
 			time_timestamp = millis();		//update timestamp
 			timeFlag = false;				//set the flag back to false
 		}
@@ -181,6 +239,7 @@ void loop()
 		{
 			eraseRuntime();					//erase runtime
 			dispRuntime();					//display runtime
+
 			runtime_timestamp = millis();	//update timestamp
 			runtimeFlag = false;			//set the flag back to false
 		}
