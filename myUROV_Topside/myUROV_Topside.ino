@@ -11,19 +11,32 @@
 #include <Adafruit_BMP280.h>				//air pressure and temperature library
 
 //pins definition for Uno for TFT screen
-#define cs   10
-#define dc   9
-#define rst  8 
+#define cs					10
+#define dc					9
+#define rst					8 
 
 //pins definition for LEDs
 #define pin_LED_PS			7
-#define pin_LED_WI_Alarm	6 //if over AI 200
+#define pin_LED_WI_Alarm	6
+
+//pins definition for RS485 serial comms
+#define pin_RS485_mode		2
 
 //global data for LCD TFT
 TFT myTFT = TFT(cs, dc, rst);				//create an instance
 
 //global data for BMP280 sensor
 Adafruit_BMP280 BMP;						//create an instance
+
+//global data for RS485 telemetry data transmission
+const int STRUCT_SIZE = 4;					//the size of struct/packet in bytes
+byte expected_ID = 0x02;
+byte incoming_byte;
+byte buffer[STRUCT_SIZE - 1];
+
+float water_temperature = 0.0;
+unsigned int water_pressure = 0;
+byte waterIngressAlarm = 0;
 
 ////////////////////////////////////////////////////
 //display runtime
@@ -142,8 +155,8 @@ void dispTempPress()
 
 	//pressure
 	myTFT.setTextSize(2);
-	myTFT.setCursor(10, 35);
-	myTFT.print(pressure, 0);
+	myTFT.setCursor(5, 35);
+	myTFT.print(pressure, 1);
 }
 
 
@@ -154,7 +167,38 @@ void eraseTempPress()
 	//temperature	
 	myTFT.fillRect(10, 80, 70, 22, ST7735_BLACK);
 	//pressure
-	myTFT.fillRect(10, 35, 55, 14, ST7735_BLACK);
+	myTFT.fillRect(5, 35, 82, 14, ST7735_BLACK);
+}
+
+
+////////////////////////////////////////////////////
+//receive telemtry data from Subsea
+void receivePacket()
+{
+	digitalWrite(pin_RS485_mode, LOW);												//DE=RE=high receive enabled
+
+	if (Serial.available())
+		{
+			incoming_byte = Serial.read();	//reads first byte only
+			
+			if (incoming_byte == expected_ID)
+			{
+				Serial.readBytes(buffer, STRUCT_SIZE - 1);
+				processBuffer(buffer);
+			}
+		}			
+}
+
+
+////////////////////////////////////////////////////
+//translate data from buffer
+void processBuffer(byte buffer[])
+{
+	water_temperature = map(buffer[0], 0, 255, 0, 40 * 100) / 100;
+	
+	water_pressure = map(buffer[1], 0, 255, 0, 12000);
+	
+	waterIngressAlarm = buffer[2];
 }
 
 
@@ -192,7 +236,7 @@ void setup()
 
 	//display 'hPa'
 	myTFT.setTextSize(2);
-	myTFT.setCursor(65, 35);
+	myTFT.setCursor(91, 35);
 	myTFT.print(F("hPa"));
 
 	//initialise BMP280 sensor
@@ -201,14 +245,22 @@ void setup()
 	//light Power Supply LED
 	pinMode(pin_LED_PS, OUTPUT);
 	digitalWrite(pin_LED_PS, HIGH);
+
+	//RS485
+	pinMode(pin_RS485_mode, OUTPUT);		//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
+	Serial.begin(9600);						//open Serial1 Port for RS485 comms
 }
 
 
-//global data to define how often to refresh info on the screen
+//global data to define how often to retrieve and refresh data
 unsigned long runtime_timestamp = 0;
+boolean runtime_flag = true;
+
 unsigned long time_timestamp = 0;
-boolean runtimeFlag = true;
-boolean timeFlag = true;
+boolean time_flag = true;
+
+unsigned long retrieve_timestamp = 0;
+boolean retrieve_flag = true;
 
 
 ////////////////////////////////////////////////////
@@ -217,13 +269,18 @@ void loop()
 {
 	//set flag for the time to elapse before another update of value displayed (in ms)
 	if (millis() - runtime_timestamp >= 2000)
-		runtimeFlag = true;
+		runtime_flag = true;
 
 	//set flag for the time to elapse before another update of value displayed (in ms)
 	if (millis() - time_timestamp >= 3000)
-		timeFlag = true;
+		time_flag = true;
 
-	if (timeFlag)
+	//set flag for retrieving data from Subsea
+	if (millis() - retrieve_timestamp >= 250)
+		retrieve_flag = true;
+
+
+	if (time_flag)
 		{
 			eraseTime();					//erase current time
 			dispTime();						//display current time
@@ -232,17 +289,50 @@ void loop()
 			dispTempPress();				//display current t
 			
 			time_timestamp = millis();		//update timestamp
-			timeFlag = false;				//set the flag back to false
+			time_flag = false;				//set the flag back to false
 		}
 
-	if (runtimeFlag)
+	if (runtime_flag)
 		{
 			eraseRuntime();					//erase runtime
 			dispRuntime();					//display runtime
 
 			runtime_timestamp = millis();	//update timestamp
-			runtimeFlag = false;			//set the flag back to false
+			runtime_flag = false;			//set the flag back to false
 		}
+
+
+
+
+	if (retrieve_flag)
+	{
+		receivePacket();
+
+		//temperature	
+		myTFT.fillRect(70, 140, 35, 7, ST7735_BLACK);
+		myTFT.fillRect(70, 130, 35, 7, ST7735_BLACK);
+		myTFT.fillRect(70, 120, 35, 7, ST7735_BLACK);
+
+		myTFT.setTextSize(1);
+		myTFT.setCursor(0, 140);
+		myTFT.setTextColor(0x2e8b);
+		myTFT.print("water temp: ");
+		myTFT.print(water_temperature);
+
+		myTFT.setCursor(0, 130);
+		myTFT.print("water pres: ");
+		myTFT.print(water_pressure);
+
+		myTFT.setCursor(0, 120);
+		myTFT.print("water ingr: ");
+		myTFT.print(waterIngressAlarm);
+
+		retrieve_timestamp = millis();
+		retrieve_flag = false;
+	}
+
+
+
 }
 
 
