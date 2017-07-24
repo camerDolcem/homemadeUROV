@@ -1,184 +1,229 @@
 /*
+****************************************************
   UROV v1
 
   Subsea controller
 
   Created in 2017 by JK
-  */
+****************************************************
 
-#include <DallasTemperature.h>								//ds18b20 temp sensor library
+Jake's style guide.
+
+	Variable names.
+----------------------------------------------------
+	Local scope variables:
+int water_temperature;
+	Global variables:
+int Water_Pressure;
+	Constants:
+const char k_Help_String[] = "Text";					-global scope
+	Static variables:
+static const char sk_Help_String[] = "Text";			-global scope
+
+	Enumerator and union names.
+----------------------------------------------------
+enum ListOfIDs {START_MSG_ID};							-global scope
+union DataPacket1 {float As_Float} TemperaturePacket;	-global scope
+
+	Macro names.
+----------------------------------------------------
+#define PIN_ALARM_LED 1			
+
+	Function names.
+----------------------------------------------------
+getWaterPressure();
+
+	Object names.
+----------------------------------------------------
+OneWire OneWire;
+*/
+
+#include <DallasTemperature.h>							//ds18b20 temp sensor library
+
+//general definitions
+#define TRUE				true
+#define FALSE				false
 
 //pins definition for 1-Wire bus
-#define ONE_WIRE_BUS	2
+#define PIN_ONE_WIRE_BUS	2
 
 //pins definition for water detection sensor
-#define pin_WI			A7
+#define PIN_WATER_INGRESS	7
 
 //pins definition for pressure transducer
-#define pin_PR			A6
+#define PIN_WATER_PRESSURE	6
 
 //pins definition for RS485 serial comms
-#define pin_RS485_mode	3
+#define PIN_RS485_MODE		3
 
-//global data for 1-Wire
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
 
-//global data for RS485 telemetry data transmission
-struct telemetryData 
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//retrieves water temperature measurement via 1-Wire protocol in deg C and returns it in deg C
+float getWaterTemperature()
 {
-	byte ID =					0x02;						//identity of the packet
-	byte temperature;
-	byte pressure;
-	byte waterIngressAlarm;									//0 - ok, 1 - alarm (if over ~5mm or AI = 40)
-} sendTopside;
-
-const int STRUCT_SIZE =			4;							//the size of struct/packet in bytes
-float water_temperature =		0.0;
-unsigned int water_pressure =	0;
-byte water_ingress =			0;
-
-
-////////////////////////////////////////////////////
-//get temperature measurement
-float temperature()
-{
-	sensors.requestTemperatures();
-	water_temperature = sensors.getTempCByIndex(0);
+	OneWire OneWire(PIN_ONE_WIRE_BUS);						//setup 1-Wire bus
+	DallasTemperature Sensors(&OneWire);					//setup temperature sensor with 1-Wire params
+	Sensors.begin();										//locate devices on the bus
+	Sensors.requestTemperaturesByIndex(0);					//start conversion in ds18b20 sensor (the only device on the bus)
+	
+	float water_temperature = Sensors.getTempCByIndex(0);	//assign temp (in deg C)
 	
 	return water_temperature;								//in degrees Celsius
 }
 
 
-////////////////////////////////////////////////////
-//get water ingress level measurement
-byte waterIngress()
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//retrieves water ingress level measurement as an analogue value and returns as mm value
+byte getWaterIngress()
 {
-	unsigned int water_ingress_read = analogRead(pin_WI);
-	water_ingress = map(water_ingress_read, 0, 435, 0, 40);	//max measured vertical ingress level is 40mm 
+	unsigned int water_ingress_read = analogRead(PIN_WATER_INGRESS);
+	byte water_ingress = 0;											//range 0 - 40mm
 
-	return water_ingress;									//in mm
+	//scaling of the sensor
+	if (water_ingress_read <= 20)
+		water_ingress = 0;											//values reported for 0mm
+	else if (water_ingress_read > 20 && water_ingress_read < 200)
+		water_ingress = map(water_ingress_read, 20, 200, 1, 5);		//in range of 1 to 5mm
+	else
+		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
+
+	return water_ingress;											//in mm
 }
 
 
-////////////////////////////////////////////////////
-//get pressure measurement
-unsigned int pressure()
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//retrieves water pressure measurement as an analogue value and returns as hPa value
+float getWaterPressure()
 {
-	const byte samples = 5;
-	int water_pressure_read[samples];
+	static const byte samples = 5;
+	unsigned int water_pressure_read[samples];
+	float water_pressure = 0.0;
 
-	for (byte i = 1; i <= samples; i++)						//average over number of samples
+	//averaging over number of samples
+	for (byte i = 1; i <= samples; i++)										
 		{
-			water_pressure_read[i] = analogRead(pin_PR);
-			if (water_pressure_read[i] < 0)
-				water_pressure_read[i] = 0;
+			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
+			
+			if (water_pressure_read[i] <= 150)
+				water_pressure_read[i] = 150;
 			water_pressure += water_pressure_read[i];
 		}
-		
-	water_pressure = map((water_pressure / samples), 102, 922, 0, 12000);	//max measured water pressure is 12 000hPa 
+	
+	water_pressure = 15.564 * (water_pressure / samples) - 2334.63;	//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
 
 	return water_pressure;													//in hPa
 }
 
 
-////////////////////////////////////////////////////
-//send telemtry data to Topside
-void sendPacket()
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//This section is connected to Serial comms. 
+
+//list of (start) delimiters/identifiers for serial messages
+enum ListOfMsgIDs
+	{ 
+		START_MSG_ID = 100, 
+		WATER_TEMPERATURE_ID = 200,
+		WATER_PRESSURE_ID = 201,
+		WATER_INGRESS_ID = 202,
+	};
+
+//define packet for water temperature value storage and type substitution
+union WaterTemperatureImplicitCast
 {
-	digitalWrite(pin_RS485_mode, HIGH);												//DE=RE=high transmit enabled
+	float As_Float;
+	byte As_Bytes[4];
+} WaterTemperaturePacket;
 
-	//convert water temperature to byte
-	water_temperature = water_temperature * 100;									//to make it look like int
-	sendTopside.temperature = (byte)map(water_temperature, 0, 40 * 100, 0, 255);	//map it as if it was int to byte
+//define packet for water pressure value storage and type substitution
+union WaterPressureImplicitCast
+{
+	float As_Float;
+	byte As_Bytes[4];
+} WaterPressurePacket;
 
-	//convert water pressure to byte
-	sendTopside.pressure = (byte)map(water_pressure, 0, 12000, 0, 255);				//map int to byte
+//define variable for water ingress level value storage
+byte Water_Ingress_Storage;
 
-	//convert water ingress to water ingress alarm if water ingress level >= 5mm
-	if (water_ingress >= 5)
-		sendTopside.waterIngressAlarm = 1;
-	else
-		sendTopside.waterIngressAlarm = 0;
+const byte Float_Size_In_Bytes = 4;						//size of byte array to store float, constant value
 
-	//fill the buffer
-	byte buffer[STRUCT_SIZE] = { sendTopside.ID, sendTopside.temperature, sendTopside.pressure, sendTopside.waterIngressAlarm };
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//send data to Topside
+void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg)
+{
+	digitalWrite(PIN_RS485_MODE, HIGH);					//DE=RE=high transmit enabled
 
-	//send the buffer
-	Serial1.write(buffer, STRUCT_SIZE);
+	//send water temperature value
+	Serial1.write(START_MSG_ID);
+	Serial1.write(WATER_TEMPERATURE_ID);
+	for (byte i = 0; i < Float_Size_In_Bytes; i++)
+		Serial1.write(waterTempArg[i]);
+
+	//send water pressure value
+	Serial1.write(START_MSG_ID);
+	Serial1.write(WATER_PRESSURE_ID);
+	for (byte i = 0; i < Float_Size_In_Bytes; i++)
+		Serial1.write(waterPressArg[i]);
+	
+	//send water ingress level value
+	Serial1.write(START_MSG_ID);
+	Serial1.write(WATER_INGRESS_ID);
+	Serial1.write(waterIngressArg);
 }
 
 
-////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
 //setup
 void setup()
 {	
-	//1-Wire sensors
-	sensors.begin();										//locate devices on the bus
-
-	//water ingress
-	pinMode(pin_WI, INPUT);
-
-	//RS485
-	pinMode(pin_RS485_mode, OUTPUT);						//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
-	Serial1.begin(9600);									//open Serial1 Port for RS485 comms
-
-	Serial.begin(9600); //del later
-}
+	//set pins to input/output
+	pinMode(PIN_WATER_INGRESS, INPUT);					//analog input
+	pinMode(PIN_WATER_PRESSURE, INPUT);					//analog input
+	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
+	
+	Serial1.begin(115200);								//open Serial1 hardware port for RS485 comms
+} //end of setup
 
 
-//global data to define how often to retrieve and send data
-unsigned long measurements_timestamp = 0;
-boolean measurements_flag = true;
+//global data defining how often to retrieve and send data
+unsigned long Measurements_Timestamp = 0;
+boolean Measurements_Flag = TRUE;
 
-unsigned long send_timestamp = 0;
-boolean send_flag = true;
+unsigned long Send_Timestamp = 0;
+boolean Send_Flag = TRUE;
 
 
-////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////
 //main program
 void loop()
 {
-	//set flag for update of temp value retrieval (in ms)
-	if (millis() - measurements_timestamp >= 100)
-		measurements_flag = true;
+	//set flag for measurements update (in ms)
+	if (millis() - Measurements_Timestamp >= 250)
+		Measurements_Flag = TRUE;
 
-	if (measurements_flag)
+	//set flag for sending telemetry data to Topside (in ms)
+	if (millis() - Send_Timestamp >= 1000)
+		Send_Flag = TRUE;
+
+	//retrieve the measurements
+	if (Measurements_Flag)
 		{
-			//Serial.print("Temperature: ");
-			//Serial.print(temperature(), 2);
-			//Serial.println(" (degC)");
+			//update water temperature, pressure and ingress level
+			WaterTemperaturePacket.As_Float = getWaterTemperature();
+			WaterPressurePacket.As_Float = getWaterPressure();
+			Water_Ingress_Storage = getWaterIngress();
 
-			water_temperature = temperature();				//in deg C
-
-			//Serial.print("Water pressure: ");
-			//Serial.print(pressure());
-			//Serial.println(" (hPa)");
-
-			water_pressure = pressure();					//in hPa
-
-			//Serial.print("Water ingress: ");
-			//Serial.print(waterIngress());
-			//Serial.println(" (mm)");
-
-			water_ingress = waterIngress();					//in mm
-
-			measurements_timestamp = millis();
-			measurements_flag = false;
+			Measurements_Timestamp = millis();
+			Measurements_Flag = FALSE;
 		}
 
-	//set flag for sending data to Topside
-	if (millis() - send_timestamp >= 100)
-		send_flag = true;
-
-	if (send_flag)
+	if (Send_Flag)
 		{
-			sendPacket();
+			sendPacket(WaterTemperaturePacket.As_Bytes, WaterPressurePacket.As_Bytes, Water_Ingress_Storage);
 
-			send_timestamp = millis();
-			send_flag = false;
+			Send_Timestamp = millis();
+			Send_Flag = FALSE;
 		}
-}
+} //end of loop
 
 
 
