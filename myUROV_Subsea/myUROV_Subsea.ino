@@ -6,43 +6,12 @@
 
   Created in 2017 by JK
 ****************************************************
-
-Jake's style guide.
-
-	Variable names.
-----------------------------------------------------
-	Local scope variables:
-int water_temperature;
-	Global variables:
-int Water_Pressure;
-	Constants:
-const char k_Help_String[] = "Text";					-global scope
-	Static variables:
-static const char sk_Help_String[] = "Text";			-global scope
-
-	Enumerator and union names.
-----------------------------------------------------
-enum ListOfIDs {START_MSG_ID};							-global scope
-union DataPacket1 {float As_Float} TemperaturePacket;	-global scope
-
-	Macro names.
-----------------------------------------------------
-#define PIN_ALARM_LED 1			
-
-	Function names.
-----------------------------------------------------
-getWaterPressure();
-
-	Object names.
-----------------------------------------------------
-OneWire OneWire;
 */
 
-#include <DallasTemperature.h>							//ds18b20 temp sensor library
+#include "defs.h""
+#include "msgID.h"
 
-//general definitions
-#define TRUE				true
-#define FALSE				false
+#include <DallasTemperature.h>							//ds18b20 temp sensor library
 
 //pins definition for 1-Wire bus
 #define PIN_ONE_WIRE_BUS	2
@@ -76,7 +45,8 @@ float getWaterTemperature()
 //retrieves water ingress level measurement as an analogue value and returns as mm value
 byte getWaterIngress()
 {
-	unsigned int water_ingress_read = analogRead(PIN_WATER_INGRESS);
+	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
+	Serial.print("water "); Serial.println(water_ingress_read);
 	byte water_ingress = 0;											//range 0 - 40mm
 
 	//scaling of the sensor
@@ -92,40 +62,32 @@ byte getWaterIngress()
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-//retrieves water pressure measurement as an analogue value and returns as hPa value
+//retrieves water pressure measurement as an analogue value and returns as Pa value
 float getWaterPressure()
 {
-	static const byte samples = 5;
-	unsigned int water_pressure_read[samples];
+	static const byte samples = 15;
+	uint16 water_pressure_read[samples];
 	float water_pressure = 0.0;
+
+	Serial.begin(115200); //debug
 
 	//averaging over number of samples
 	for (byte i = 1; i <= samples; i++)										
 		{
 			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
 			
-			if (water_pressure_read[i] <= 150)
-				water_pressure_read[i] = 150;
+			Serial.println(water_pressure_read[i]); //debug
+			
+			if (water_pressure_read[i] < 115)
+				water_pressure_read[i] = 115;
 			water_pressure += water_pressure_read[i];
 		}
 	
-	water_pressure = 15.564 * (water_pressure / samples) - 2334.63;	//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
-
-	return water_pressure;													//in hPa
+	water_pressure = 1490.68323 * (water_pressure / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
+	Serial.println(water_pressure);
+	return water_pressure;													//in Pa
 }
 
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-//This section is connected to Serial comms. 
-
-//list of (start) delimiters/identifiers for serial messages
-enum ListOfMsgIDs
-	{ 
-		START_MSG_ID = 100, 
-		WATER_TEMPERATURE_ID = 200,
-		WATER_PRESSURE_ID = 201,
-		WATER_INGRESS_ID = 202,
-	};
 
 //define packet for water temperature value storage and type substitution
 union WaterTemperatureImplicitCast
@@ -185,11 +147,11 @@ void setup()
 
 
 //global data defining how often to retrieve and send data
-unsigned long Measurements_Timestamp = 0;
-boolean Measurements_Flag = TRUE;
+ulong32 Measurements_Timestamp = 0;
+bool Measurements_Flag = TRUE;
 
-unsigned long Send_Timestamp = 0;
-boolean Send_Flag = TRUE;
+ulong32 Send_Timestamp = 0;
+bool Send_Flag = TRUE;
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////

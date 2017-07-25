@@ -1,49 +1,19 @@
 /*
+****************************************************
   UROV v1
 
   Topside controller
 
   Created in 2017 by JK
-  ****************************************************
+****************************************************
+*/
 
-  Jake's style guide.
-
-  Variable names.
-  ----------------------------------------------------
-  Local scope variables:
-  int water_temperature;
-  Global variables:
-  int Water_Pressure;
-  Constants:
-  const char k_Help_String[] = "Text";					-global scope
-  Static variables:
-  static const char sk_Help_String[] = "Text";			-global scope
-
-  Enumerator and union names.
-  ----------------------------------------------------
-  enum ListOfIDs {START_MSG_ID};							-global scope
-  union DataPacket1 {float As_Float} TemperaturePacket;	-global scope
-
-  Macro names.
-  ----------------------------------------------------
-  #define PIN_ALARM_LED 1
-
-  Function names.
-  ----------------------------------------------------
-  getWaterPressure();
-
-  Object names.
-  ----------------------------------------------------
-  OneWire OneWire;
-  */
+#include "defs.h"
+#include "msgID.h"
 
 #include <TFT.h>							//LCD TFT library
 #include <DS1307RTC.h>						//Real Time Clock library
 #include <Adafruit_BMP280.h>				//air pressure and temperature sensor library
-
-//general definitions
-#define TRUE				true
-#define FALSE				false
 
 //pins definition for TFT screen
 #define PIN_CS				10
@@ -66,9 +36,9 @@ TFT MyTFT = TFT(PIN_CS, PIN_DC, PIN_RST);
 void dispRuntime()
 {
 	//calculate full hrs and remaining mins and sePIN_CS
-	unsigned long timer = millis();			//ms total
+	ulong32 timer = millis();			//ms total
 	timer = timer * 0.001;					//s total
-	unsigned int timerMin = timer / 60;		//full mins only
+	uint16 timerMin = timer / 60;			//full mins only
 	byte timerHrs = timerMin / 60;			//full hours only
 	timer = timer - timerMin * 60;			//s only (on top of minutes)
 	timerMin = timerMin - timerHrs * 60;	//min only (on top of hours)
@@ -205,18 +175,6 @@ void eraseAirTemperatureAndPressure()
 }
 
 
-/////////////////////////////////////////////////////////////////////////////////////////////////
-//This section is connected to Serial comms. 
-
-//list of (start) delimiters/identifiers for serial messages
-enum ListOfMsgIDs
-{
-	START_MSG_ID = 100,
-	WATER_TEMPERATURE_ID = 200,
-	WATER_PRESSURE_ID = 201,
-	WATER_INGRESS_ID = 202,
-};
-
 //define array for serial message storage
 byte ReceivedPacket[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1 };	//{4 bytes for water temp, 4 bytes for water press, 1 byte for water ingress}
 
@@ -277,17 +235,16 @@ void dispWaterTemperaturePressureDepth()
 	//temperature
 	MyTFT.setCursor(10, 92);
 	MyTFT.setTextColor(ST7735_WHITE);
-	//MyTFT.print(water_temperature, 1);	//hPa
-	MyTFT.print(water_temperature, 1);		//bar
+	MyTFT.print(water_temperature, 1);					//degC
 
 	//pressure
 	MyTFT.setCursor(10, 113);
-	MyTFT.print(water_pressure / 1000.0, 2);
+	MyTFT.print(water_pressure / 100000.0, 2);			//bar
 
 	//depth
 	MyTFT.setCursor(10, 134);
-	MyTFT.print(water_pressure * 100.0 / 10041.516, 2);
-}
+	MyTFT.print(water_pressure / (Rho * G), 2);			//= Pgauge[Pa]/( rho[kg/m^3] * g[m/s^2])
+}														
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -381,17 +338,17 @@ void setup()
 
 
 //global data to define how often to retrieve and refresh data
-unsigned long Runtime_Timestamp = 0;
-boolean RunTime_Flag = TRUE;
+ulong32 Runtime_Timestamp = 0;
+bool RunTime_Flag = TRUE;
 
-unsigned long Time_Timestamp = 0;
-boolean Time_Flag = TRUE;
+ulong32 Time_Timestamp = 0;
+bool Time_Flag = TRUE;
 
-unsigned long Measurements_Timestamp = 0;
-boolean Measurements_Flag = TRUE;
+ulong32 Measurements_Timestamp = 0;
+bool Measurements_Flag = TRUE;
 
-unsigned long Retrieve_Timestamp = 0;
-boolean Retrieve_Flag = TRUE;
+ulong32 Retrieve_Timestamp = 0;
+bool Retrieve_Flag = TRUE;
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
