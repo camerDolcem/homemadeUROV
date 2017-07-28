@@ -1,12 +1,15 @@
-/*
-****************************************************
-  UROV v1
-
-  Topside controller
-
-  Created in 2017 by JK
-****************************************************
-*/
+/***********************************************************************************
+ Name:
+     myUROV_Subsea.ino
+ Description:
+     Topside controller
+ Version:
+     01
+ Created:
+	2017
+ By:
+	Jakub Kurkowski
+***********************************************************************************/
 
 #include "defs.h"
 #include "msgID.h"
@@ -25,9 +28,9 @@
 #define pin_LED_LEAK_ALARM	6
 
 //pins definition for RS485 serial comms
-#define PIN_RS485_MODE		2
+#define PIN_RS485_MODE		4
 
-//global object for LCD TFT screen manipulations
+//for LCD TFT screen manipulations
 TFT MyTFT = TFT(PIN_CS, PIN_DC, PIN_RST);				
 
 

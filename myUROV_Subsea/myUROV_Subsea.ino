@@ -1,12 +1,15 @@
-/*
-****************************************************
-  UROV v1
-
-  Subsea controller
-
-  Created in 2017 by JK
-****************************************************
-*/
+/***********************************************************************************
+ Name:
+     myUROV_Subsea.ino
+ Description:
+     Subsea controller
+ Version:
+     01
+ Created:
+	2017
+ By:
+	Jakub Kurkowski
+***********************************************************************************/
 
 #include "defs.h""
 #include "msgID.h"
@@ -14,7 +17,7 @@
 #include <DallasTemperature.h>							//ds18b20 temp sensor library
 
 //pins definition for 1-Wire bus
-#define PIN_ONE_WIRE_BUS	2
+#define PIN_ONE_WIRE_BUS	5
 
 //pins definition for water detection sensor
 #define PIN_WATER_INGRESS	7
@@ -23,7 +26,7 @@
 #define PIN_WATER_PRESSURE	6
 
 //pins definition for RS485 serial comms
-#define PIN_RS485_MODE		3
+#define PIN_RS485_MODE		4
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -46,7 +49,9 @@ float getWaterTemperature()
 byte getWaterIngress()
 {
 	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
-	Serial.print("water "); Serial.println(water_ingress_read);
+	
+	Serial.print("water inress ana: "); Serial.println(water_ingress_read);//debug
+	
 	byte water_ingress = 0;											//range 0 - 40mm
 
 	//scaling of the sensor
@@ -56,6 +61,8 @@ byte getWaterIngress()
 		water_ingress = map(water_ingress_read, 20, 200, 1, 5);		//in range of 1 to 5mm
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
+
+	Serial.print("water inress mm: "); Serial.println(water_ingress);//debug
 
 	return water_ingress;											//in mm
 }
@@ -78,13 +85,13 @@ float getWaterPressure()
 			
 			Serial.println(water_pressure_read[i]); //debug
 			
-			if (water_pressure_read[i] < 115)
-				water_pressure_read[i] = 115;
+			if (water_pressure_read[i] < 150)
+				water_pressure_read[i] = 116;
 			water_pressure += water_pressure_read[i];
 		}
 	
 	water_pressure = 1490.68323 * (water_pressure / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
-	Serial.println(water_pressure);
+	Serial.println("water pressure result: "); Serial.println(water_pressure);//debug
 	return water_pressure;													//in Pa
 }
 

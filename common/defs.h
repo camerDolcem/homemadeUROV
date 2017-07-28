@@ -1,3 +1,16 @@
+/***********************************************************************************
+ Name:
+     defs.h
+ Description:
+     Misc definitions
+ Version:
+     01
+ Created:
+	2017
+ By:
+	Jakub Kurkowski
+***********************************************************************************/
+
 //general definitions
 #define TRUE				true
 #define FALSE				false
