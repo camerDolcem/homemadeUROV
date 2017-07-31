@@ -17,16 +17,16 @@
 #include <DallasTemperature.h>							//ds18b20 temp sensor library
 
 //pins definition for 1-Wire bus
-#define PIN_ONE_WIRE_BUS	5
+#define PIN_ONE_WIRE_BUS	3
 
 //pins definition for water detection sensor
-#define PIN_WATER_INGRESS	7
+#define PIN_WATER_INGRESS	A7
 
 //pins definition for pressure transducer
-#define PIN_WATER_PRESSURE	6
+#define PIN_WATER_PRESSURE	A6
 
 //pins definition for RS485 serial comms
-#define PIN_RS485_MODE		4
+#define PIN_RS485_MODE		2
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -37,10 +37,9 @@ float getWaterTemperature()
 	DallasTemperature Sensors(&OneWire);					//setup temperature sensor with 1-Wire params
 	Sensors.begin();										//locate devices on the bus
 	Sensors.requestTemperaturesByIndex(0);					//start conversion in ds18b20 sensor (the only device on the bus)
-	
 	float water_temperature = Sensors.getTempCByIndex(0);	//assign temp (in deg C)
-	
-	return water_temperature;								//in degrees Celsius
+											
+	return water_temperature;						//in degrees Celsius
 }
 
 
@@ -62,7 +61,7 @@ byte getWaterIngress()
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
 
-	Serial.print("water inress mm: "); Serial.println(water_ingress);//debug
+	//Serial.print("water inress mm: "); Serial.println(water_ingress);//debug
 
 	return water_ingress;											//in mm
 }
@@ -76,22 +75,22 @@ float getWaterPressure()
 	uint16 water_pressure_read[samples];
 	float water_pressure = 0.0;
 
-	Serial.begin(115200); //debug
+	//Serial.begin(115200); //debug
 
 	//averaging over number of samples
 	for (byte i = 1; i <= samples; i++)										
 		{
 			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
 			
-			Serial.println(water_pressure_read[i]); //debug
+			//Serial.println(water_pressure_read[i]); //debug
 			
-			if (water_pressure_read[i] < 150)
+			if (water_pressure_read[i] < 116)
 				water_pressure_read[i] = 116;
 			water_pressure += water_pressure_read[i];
 		}
 	
 	water_pressure = 1490.68323 * (water_pressure / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
-	Serial.println("water pressure result: "); Serial.println(water_pressure);//debug
+	//Serial.println("water pressure result: "); Serial.println(water_pressure);//debug
 	return water_pressure;													//in Pa
 }
 
@@ -116,7 +115,7 @@ byte Water_Ingress_Storage;
 const byte Float_Size_In_Bytes = 4;						//size of byte array to store float, constant value
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
-//send data to Topside
+//send measurements to Topside
 void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg)
 {
 	digitalWrite(PIN_RS485_MODE, HIGH);					//DE=RE=high transmit enabled
@@ -149,7 +148,7 @@ void setup()
 	pinMode(PIN_WATER_PRESSURE, INPUT);					//analog input
 	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
 	
-	Serial1.begin(115200);								//open Serial1 hardware port for RS485 comms
+	Serial1.begin(BITRATE);								//open Serial1 hardware port for RS485 comms
 } //end of setup
 
 
@@ -157,9 +156,8 @@ void setup()
 ulong32 Measurements_Timestamp = 0;
 bool Measurements_Flag = TRUE;
 
-ulong32 Send_Timestamp = 0;
+ulong32 Send_Timestamp = 1500;
 bool Send_Flag = TRUE;
-
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //main program
@@ -170,7 +168,7 @@ void loop()
 		Measurements_Flag = TRUE;
 
 	//set flag for sending telemetry data to Topside (in ms)
-	if (millis() - Send_Timestamp >= 1000)
+	if (millis() - Send_Timestamp >= 500)
 		Send_Flag = TRUE;
 
 	//retrieve the measurements
