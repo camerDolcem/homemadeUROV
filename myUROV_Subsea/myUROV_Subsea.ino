@@ -49,8 +49,6 @@ byte getWaterIngress()
 {
 	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
 	
-	Serial.print("water inress ana: "); Serial.println(water_ingress_read);//debug
-	
 	byte water_ingress = 0;											//range 0 - 40mm
 
 	//scaling of the sensor
@@ -61,7 +59,7 @@ byte getWaterIngress()
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
 
-	//Serial.print("water inress mm: "); Serial.println(water_ingress);//debug
+	Serial.print("water ingress in mm: "); Serial.println(water_ingress);//debug
 
 	return water_ingress;											//in mm
 }
@@ -75,8 +73,6 @@ float getWaterPressure()
 	uint16 water_pressure_read[samples];
 	float water_pressure = 0.0;
 
-	//Serial.begin(115200); //debug
-
 	//averaging over number of samples
 	for (byte i = 1; i <= samples; i++)										
 		{
@@ -85,12 +81,20 @@ float getWaterPressure()
 			//Serial.println(water_pressure_read[i]); //debug
 			
 			if (water_pressure_read[i] < 116)
+			{
+				//Serial.println(water_pressure_read[i]);//debug
+
 				water_pressure_read[i] = 116;
+			}
+
+
 			water_pressure += water_pressure_read[i];
 		}
 	
 	water_pressure = 1490.68323 * (water_pressure / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
-	//Serial.println("water pressure result: "); Serial.println(water_pressure);//debug
+	
+	//Serial.print("water pressure result: "); Serial.println(water_pressure / 100000.0, 2);//debug
+	
 	return water_pressure;													//in Pa
 }
 
@@ -118,7 +122,8 @@ const byte Float_Size_In_Bytes = 4;						//size of byte array to store float, co
 //send measurements to Topside
 void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg)
 {
-	digitalWrite(PIN_RS485_MODE, HIGH);					//DE=RE=high transmit enabled
+	digitalWrite(PIN_RS485_MODE, HIGH);			//DE=RE=high transmit enabled
+	delay(1);
 
 	//send water temperature value
 	Serial1.write(START_MSG_ID);
@@ -136,6 +141,67 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 	Serial1.write(START_MSG_ID);
 	Serial1.write(WATER_INGRESS_ID);
 	Serial1.write(waterIngressArg);
+
+	delay(7);									//safe amount of time to clock out last three bytes
+	digitalWrite(PIN_RS485_MODE, LOW);			//DE=RE=low transmit disabled
+}
+
+
+//define array for serial control message storage
+byte Received_Packet[] = { 0, 0, 0, 0 };	//{1 byte left/right, 1 byte fwd/bwd, 1 byte up, 1 byte down}
+
+//define byte to store single byte from the message
+byte Incoming_Byte = 0;
+
+//set flag indicating there is new data to be read and to suppress sending any data temporarily
+//bool Read_Flag = TRUE;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//receive left/right, fwd/bwd,  up and down info
+void receiveTopsideJoystickData()
+{
+	digitalWrite(PIN_RS485_MODE, LOW);					//DE=RE=low receive enabled
+
+	while (Serial1.available() >= 3)						//6 bytes defines biggest type variable message - float
+	{
+
+		Incoming_Byte = Serial1.read();
+
+		if (Incoming_Byte == START_CTRL_ID)
+			{
+				Incoming_Byte = Serial1.read();
+
+				switch (Incoming_Byte)
+					{
+						case X_MSG_ID:
+							{
+								Received_Packet[0] = Serial1.read();
+							}
+							break;
+
+						case Y_MSG_ID:
+							{
+								Received_Packet[1] = Serial1.read();
+							}
+							break;
+
+						case Z1_MSG_ID:
+							{
+								Received_Packet[2] = Serial1.read();
+							}
+							break;
+
+						case Z2_MSG_ID:
+							{
+								Received_Packet[3] = Serial1.read();
+							}
+							break;
+
+						default:											//corrupted packet								
+							break;
+					}//switch
+			}//if
+	}//while
 }
 
 
@@ -149,6 +215,8 @@ void setup()
 	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
 	
 	Serial1.begin(BITRATE);								//open Serial1 hardware port for RS485 comms
+
+	Serial.begin(BITRATE); //debug
 } //end of setup
 
 
@@ -156,7 +224,7 @@ void setup()
 ulong32 Measurements_Timestamp = 0;
 bool Measurements_Flag = TRUE;
 
-ulong32 Send_Timestamp = 1500;
+ulong32 Send_Timestamp = 0;
 bool Send_Flag = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -164,11 +232,11 @@ bool Send_Flag = TRUE;
 void loop()
 {
 	//set flag for measurements update (in ms)
-	if (millis() - Measurements_Timestamp >= 250)
+	if (millis() - Measurements_Timestamp >= 750)
 		Measurements_Flag = TRUE;
 
 	//set flag for sending telemetry data to Topside (in ms)
-	if (millis() - Send_Timestamp >= 500)
+	if (millis() - Send_Timestamp >= 1000)
 		Send_Flag = TRUE;
 
 	//retrieve the measurements
@@ -190,6 +258,16 @@ void loop()
 			Send_Timestamp = millis();
 			Send_Flag = FALSE;
 		}
+
+	receiveTopsideJoystickData();
+	//joystick stuff//////////////
+
+	Serial.print("UP = ");  Serial.print(Received_Packet[2]); Serial.print("\t");
+	Serial.print("DOWN = "); Serial.println(Received_Packet[3]);
+	Serial.print("X = "); Serial.println(Received_Packet[0]);// Serial.print(" mapped to: "); Serial.println(map(Received_Packet[0], 0, 1023, 0, 255));
+	Serial.print("Y = "); Serial.println(Received_Packet[1]); //Serial.print(" mapped to: "); Serial.println(map(anaY, 0, 1023, 0, 255));
+	delay(222);
+
 } //end of loop
 
 

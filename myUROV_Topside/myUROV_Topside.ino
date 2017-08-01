@@ -191,50 +191,63 @@ void eraseAirTemperatureAndPressure()
 
 
 //define array for serial message storage
-byte Received_Packet[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1 };	//{4 bytes for water temp, 4 bytes for water press, 1 byte for water ingress}
+byte Received_Packet[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x6 };	//{4 bytes for water temp, 4 bytes for water press, 1 byte for water ingress}
+
+//define byte to store single byte from the message
+byte Incoming_Byte = 0;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //receive water pressure, temperature and leak level data
 void receiveSubseaTelemetryData()
 {
-	digitalWrite(PIN_LED_RX, HIGH);
 	digitalWrite(PIN_RS485_MODE, LOW);					//DE=RE=low receive enabled
-
-	byte incoming_byte = 0;
 			
 	while (Serial.available() >= 6)						//6 bytes defines biggest type variable message - float
-	{
-		incoming_byte = Serial.read();
+	{	
+		digitalWrite(PIN_LED_RX, HIGH);
 
-		if (incoming_byte == START_MSG_ID)
+		Incoming_Byte = Serial.read();
+
+		if (Incoming_Byte == START_MSG_ID)
 			{
-				incoming_byte = Serial.read();
+				Incoming_Byte = Serial.read();
 
-				switch (incoming_byte)
-				{
-					case WATER_TEMPERATURE_ID:
-						{
-							Serial.readBytes(Received_Packet, 4);
-						}
-						break;
+				switch (Incoming_Byte)
+					{
+						case WATER_TEMPERATURE_ID:
+							{
+								Serial.readBytes(Received_Packet, 4);
+							}
+							break;
 							
-					case WATER_PRESSURE_ID:
-						{	
-							Serial.readBytes((Received_Packet + 4), 4);
-						}
-						break;
+						case WATER_PRESSURE_ID:
+							{	
+								Serial.readBytes((Received_Packet + 4), 4);
+							}
+							break;
 
-					case WATER_INGRESS_ID:
-						{
-							Serial.readBytes((Received_Packet + 8), 1);
-						}
-						break;
+						case WATER_INGRESS_ID:
+							{
+								Serial.readBytes((Received_Packet + 8), 1);
+							}
+							break;
 
-					default:						//corrupted packet								
-						break;
-				}//switch
+						default:											//corrupted packet								
+							{
+								analogWrite(PIN_BUZZER_LEAK_ALARM, 100);	//beep for 0.5sec
+								delay(35);
+								analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+								delay(35);
+								analogWrite(PIN_BUZZER_LEAK_ALARM, 100);	
+								delay(35);
+								analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+							}
+							break;
+					}//switch
 			}//if
 	}//while
+
+	digitalWrite(PIN_LED_RX, LOW);
 }
 
 
@@ -277,16 +290,17 @@ void eraseWaterTemperaturePressureDepth()
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //check water ingress level and set alarm
-void checkWaterLeakAlarm()
+void setWaterLeakAlarm()
 {	
 	byte Water_Ingress_Alarm = Received_Packet[8];
 
-	if (Water_Ingress_Alarm >= 3 & Water_Ingress_Alarm <= 5)//that indicates humidity in the enclosure 
+	if (Water_Ingress_Alarm >= 3 & Water_Ingress_Alarm <= 5)//that indicates humidity in the enclosure most likely
 		{
 			digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
+			analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
 		}
 
-	else if (Water_Ingress_Alarm >= 6)					//that indicates likely leak
+	else if (Water_Ingress_Alarm >= 6)						//that indicates probable leak
 		{
 			digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
 			analogWrite(PIN_BUZZER_LEAK_ALARM, 200);
@@ -305,6 +319,13 @@ byte Left_Right_Motion = LEFT_RIGHT_DEFAULT;
 byte Forward_Backward_Motion = FORWARD_BACKWARD_DEFAULT;
 byte Up_Motion = 1;
 byte Down_Motion = 1;
+byte Left_Right_Motion_Old;
+byte Forward_Backward_Motion_Old;
+byte Up_Motion_Old;
+byte Down_Motion_Old;
+
+//set flag determining when to send new (only) joystick readings and suppress receiving any data temporarily
+bool Send_Flag = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //read joystick command
@@ -314,37 +335,60 @@ void getCmd()
 	Forward_Backward_Motion = map(analogRead(PIN_JOYSTICK_Y), 0, 1023, 0, 255);
 	Up_Motion = digitalRead(PIN_BUTTON_UP);
 	Down_Motion = digitalRead(PIN_BUTTON_DOWN);
+
+	if (Left_Right_Motion_Old != Left_Right_Motion)
+		{
+			Left_Right_Motion_Old = Left_Right_Motion;
+			Send_Flag = TRUE;
+		}
+	if (Forward_Backward_Motion_Old != Forward_Backward_Motion)
+		{
+			Forward_Backward_Motion_Old = Forward_Backward_Motion;
+			Send_Flag = TRUE;
+		}
+	if (Up_Motion_Old != Up_Motion)
+		{
+			Up_Motion_Old = Up_Motion;
+			Send_Flag = TRUE;
+		}
+	if (Down_Motion_Old != Down_Motion)
+		{
+			Down_Motion_Old = Down_Motion;
+			Send_Flag = TRUE;
+		}
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send joystick translated motion data to Subsea
-void sendControlsToSubsea(byte LeftRightArg, byte FwdBwdArg, byte UpArg, byte DownArg)
+void sendControlsToSubsea(byte& LeftRightArg, byte& FwdBwdArg, byte& UpArg, byte& DownArg)
 {
+	digitalWrite(PIN_LED_TX, HIGH);
 	digitalWrite(PIN_RS485_MODE, HIGH);		//DE=RE=high transmit enabled
-	digitalWrite(PIN_LED_TX, HIGH);		
+	delay(1);
 
 	//send Forward/Backword motion data
-	Serial.write(START_MSG_ID);
+	Serial.write(START_CTRL_ID);
 	Serial.write(X_MSG_ID);
 	Serial.write(LeftRightArg);
 
 	//send Left/Right motion data
-	Serial.write(START_MSG_ID);
+	Serial.write(START_CTRL_ID);
 	Serial.write(Y_MSG_ID);
 	Serial.write(FwdBwdArg);
 
 	//send Up motion data
-	Serial.write(START_MSG_ID);
+	Serial.write(START_CTRL_ID);
 	Serial.write(Z1_MSG_ID);
 	Serial.write(UpArg);
 
 	//send Down motion data
-	Serial.write(START_MSG_ID);
+	Serial.write(START_CTRL_ID);
 	Serial.write(Z2_MSG_ID);
 	Serial.write(DownArg);
 
-	delay(5);
-	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=high transmit enabled
+	delay(7);								//safe amount of time to clock out last three bytes
+	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
+	digitalWrite(PIN_LED_TX, LOW);
 }
 
 
@@ -440,12 +484,6 @@ bool Time_Flag = TRUE;
 ulong32 Measurements_Timestamp = 0;
 bool Measurements_Flag = TRUE;
 
-ulong32 Retrieve_Timestamp = 0;
-bool Retrieve_Flag = TRUE;
-
-ulong32 Send_Timestamp = 0;
-bool Send_Flag = TRUE;
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //main program
 void loop()
@@ -455,23 +493,23 @@ void loop()
 		RunTime_Flag = TRUE;
 
 	//set flag for current time update (in ms)
-	if (millis() - Time_Timestamp >= 1000)
+	if (millis() - Time_Timestamp >= 15000)
 		Time_Flag = TRUE;
 
 	//set flag for current time update (in ms)
-	if (millis() - Measurements_Timestamp >= 2000)
+	if (millis() - Measurements_Timestamp >= 3000)
 		Measurements_Flag = TRUE;
 
 	//set flag for retrieving telemetry data from Subsea
-	if (millis() - Retrieve_Timestamp >= 0)
-		Retrieve_Flag = TRUE;
+	//if (millis() - Retrieve_Timestamp >= 0)
+	//	Retrieve_Flag = TRUE;
 
 	//set flag for sending controls data to Subsea
-	if (millis() - Send_Timestamp >= 100)
-		Send_Flag = TRUE;
+	//if (millis() - Send_Timestamp >= 100)
+	//	Send_Flag = TRUE;
 
-	digitalWrite(PIN_LED_RX, LOW);
-	digitalWrite(PIN_LED_TX, LOW);
+	//digitalWrite(PIN_LED_RX, LOW);
+	//digitalWrite(PIN_LED_TX, LOW);
 
 	if (RunTime_Flag)
 		{
@@ -499,34 +537,26 @@ void loop()
 			eraseWaterTemperaturePressureDepth();
 			dispWaterTemperaturePressureDepth();
 
-			checkWaterLeakAlarm();
+			setWaterLeakAlarm();
 
 			Measurements_Timestamp = millis();
 			Measurements_Flag = FALSE;
 		}
 
-	if (Retrieve_Flag)
+	getCmd();
+
+	if (!Send_Flag)
 		{
 			receiveSubseaTelemetryData();
-		
-			Retrieve_Timestamp = millis();
-			Retrieve_Flag = FALSE;
 		}
-	
-	getCmd();
 
 	if (Send_Flag)
 		{
-			do
-				{
-					 if(!Send_Flag)
-						 getCmd();
-					sendControlsToSubsea(Left_Right_Motion, Forward_Backward_Motion, Up_Motion, Down_Motion);
-					Send_Timestamp = millis();
-					Send_Flag = FALSE;
+			sendControlsToSubsea(Left_Right_Motion, Forward_Backward_Motion, Up_Motion, Down_Motion);
+			Send_Flag = FALSE;
+		} 
+		
 
-				} while (Left_Right_Motion != LEFT_RIGHT_DEFAULT || Forward_Backward_Motion != FORWARD_BACKWARD_DEFAULT || Up_Motion != 1 || Down_Motion != 1);
-		}
 		
 	//joystick stuff//////////////
 	//uint16 butup = digitalRead(PIN_BUTTON_UP);
@@ -537,7 +567,7 @@ void loop()
 	//Serial.print("DOWN = "); Serial.println(butdown); 
 	//Serial.print("X = "); Serial.print(anaX); Serial.print(" or: "); Serial.println(map(anaX, 0, 1023, 0, 255));
 	//Serial.print("Y = "); Serial.print(anaY); Serial.print(" or: "); Serial.println(map(anaY, 0, 1023, 0, 255));
-	//delay(150);
+	
 }//end of loop
 
 
