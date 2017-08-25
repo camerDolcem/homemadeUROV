@@ -25,4 +25,5 @@ enum ListOfMsgIDs
 	Y_MSG_ID =				150,
 	Z1_MSG_ID =				175,
 	Z2_MSG_ID =				200,
+	L_MSG_ID =				225,
 };
