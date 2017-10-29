@@ -13,17 +13,33 @@
 
 enum ListOfMsgIDs
 {
-	START_MSG_ID =			10,
+	//Subsea -> Topside messages delimiters
+	START_WATERTEMP_MSG_ID =	1,
+	STOP_WATERTEMP_MSG_ID =		2,
 
-	WATER_TEMPERATURE_ID =	50,
-	WATER_PRESSURE_ID =		75,
-	WATER_INGRESS_ID =		100,
+	START_WATERPRESS_MSG_ID =	3,
+	STOP_WATERPRESS_MSG_ID =	4,
 
-	START_CTRL_ID =			20,
+	START_WATERING_MSG_ID =		5,
+	STOP_WATERING_MSG_ID =		6,
 
-	X_MSG_ID =				125,
-	Y_MSG_ID =				150,
-	Z1_MSG_ID =				175,
-	Z2_MSG_ID =				200,
-	L_MSG_ID =				225,
+	//Topside -> Subsea messages delimiters
+	START_X_MSG_ID =			11,
+	STOP_X_MSG_ID =				12,
+
+	START_Y_MSG_ID =			13,
+	STOP_Y_MSG_ID =				14,
+
+	START_Z_MSG_ID =			15,
+	STOP_Z_MSG_ID =				16,
+
+	START_LIGHTS_MSG_ID =		17,
+	STOP_LIGHTS_MSG_ID =		18,
+
+	START_SERVO_MSG_ID =		19,
+	STOP_SERVO_MSG_ID =			20,
+
+	START_WATCHDOG_MSG_ID =		21,
+	STOP_WATCHDOG_MSG_ID =		22,
+	WATCHDOG_MSG_ID =			100,
 };
