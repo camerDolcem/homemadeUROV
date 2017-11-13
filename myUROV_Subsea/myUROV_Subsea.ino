@@ -23,19 +23,25 @@
 #define PIN_WATER_PRESSURE	A1
 
 //pin definition for the relay
-#define PIN_LIGHTS_SWITCH	4
+#define PIN_LIGHTS_SWITCH	8
 
 //pin definition for 1-Wire bus
-#define PIN_ONE_WIRE_BUS	6
+#define PIN_ONE_WIRE_BUS	9
 
 //pin definition for servo signal
-#define PIN_SERVO			8
+#define PIN_SERVO			7
+
+//pin definition for forw/backw movement
+#define PIN_MOTORS_FB		3
 
 //pin definition for RS485 serial comms
-#define PIN_RS485_MODE		10
+#define PIN_RS485_MODE		12
 
 //tilt camera servo obj
 Servo TiltServo;
+
+//fwd/bwd motors servo obj
+Servo MotorsFBServo;
 
 //commms watchdog time data
 uint32 Wdog_Timestamp = 0;
@@ -100,7 +106,6 @@ float getWaterPressure()
 
 				water_pressure_read[i] = 116;
 			}
-
 
 			water_pressure += water_pressure_read[i];
 		}
@@ -184,7 +189,7 @@ struct
 	uint16 Y_PWM_CMD = 1500;		//1000-1500us to go bwd, 1500-2000us to go fwd
 	uint16 Z_PWM_CMD = 1500;		//1000-1500us to rise, 1500-2000us to dive
 	bool LIGHTS_CMD = FALSE;		//TRUE to turn the lights on, FALSE to turn them off
-	byte SERVO_CMD = 90;			//position of the servo in deg
+	byte SERVO_CMD = 80;			//position of the servo in deg
 } commands;
 
 //define byte to store single byte from the message
@@ -281,6 +286,7 @@ void receiveTopsideJoystickData()
 			default:	//corrupted packet		
 			{ 
 				//Serial.println("Corrupted packet!");
+				//Serial.println("0");
 				blink(1, 10);
 			}
 				break;
@@ -298,7 +304,7 @@ void processControls()
 {
 	/* motors */
 
-	//convert ctrls to cmds for 3 pair of engines and lights 
+	Send_Motors_Cmd = TRUE;
 
 	/* lights */
 
@@ -311,16 +317,14 @@ void processControls()
 	//reset
 	if (controls.SERVO == 0)
 	{
-		commands.SERVO_CMD = 90;
+		commands.SERVO_CMD = 80;
 		Send_Servo_Cmd = TRUE;
-		//Serial.println(controls.SERVO); //debug
-
 	}
 
 	//lower
 	else if (controls.SERVO == 1)
 	{
-		if (commands.SERVO_CMD > 75)
+		if (commands.SERVO_CMD > 10)
 		{
 			commands.SERVO_CMD -= 1;
 			Send_Servo_Cmd = TRUE;
@@ -333,7 +337,7 @@ void processControls()
 	//higher
 	else if (controls.SERVO == 3)
 	{
-		if (commands.SERVO_CMD < 300)
+		if (commands.SERVO_CMD < 170)
 		{
 			commands.SERVO_CMD += 1;
 			Send_Servo_Cmd = TRUE;
@@ -363,10 +367,7 @@ void sendCommands()
 {
 	/* motors */
 	if (Send_Motors_Cmd)
-	{
-		//send each commands on 3 pair of engines and lights
-
-	}
+		MotorsFBServo.writeMicroseconds(1375);
 
 	/* lights */
 	if (commands.LIGHTS_CMD)
@@ -472,7 +473,10 @@ void setup()
 	pinMode(PIN_WATER_INGRESS, INPUT);					//analog input
 	pinMode(PIN_WATER_PRESSURE, INPUT);					//analog input
 	pinMode(PIN_LIGHTS_SWITCH, OUTPUT);					//lights switch
+	pinMode(PIN_MOTORS_FB, OUTPUT);
 	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
+
+	MotorsFBServo.attach(PIN_MOTORS_FB);
 
 	//initiate motors, lights, servo with default commands
 	sendCommands();
