@@ -25,8 +25,9 @@ const float RHO = 1023.6; 	//density of sea water [kg/m^3]
 const float G = 9.81;		//Gravitational acceleration [m/s^2]
 
 //serial comms bitrate for both microcontrollers
-const uint32 BITRATE = 14400;
+const uint32 BITRATE = 19200;
 
 //joystick default position mapped readings
 const byte LEFT_RIGHT_DEFAULT = 131; 
-const byte FORWARD_BACKWARD_DEFAULT = 124;
+const byte FORWARD_BACKWARD_DEFAULT = 124; 
+const byte FLUCTUATION_DEFAULT = 5;

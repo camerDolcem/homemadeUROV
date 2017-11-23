@@ -408,12 +408,12 @@ void getCmd()
 	Down_Button_Motion = digitalRead(PIN_BUTTON_DOWN);
 
 	//take into account fluctuations on analog signal from the joystick
-	if (Left_Right_Joystick_Motion >= (LEFT_RIGHT_DEFAULT - 5) && 
-		Left_Right_Joystick_Motion <= (LEFT_RIGHT_DEFAULT + 5))
+	if (Left_Right_Joystick_Motion >= (LEFT_RIGHT_DEFAULT - FLUCTUATION_DEFAULT) &&
+		Left_Right_Joystick_Motion <= (LEFT_RIGHT_DEFAULT + FLUCTUATION_DEFAULT))
 		Left_Right_Joystick_Motion = LEFT_RIGHT_DEFAULT;
 	
-	if (Forward_Backward_Joystick_Motion >= (FORWARD_BACKWARD_DEFAULT - 5) && 
-		Forward_Backward_Joystick_Motion <= (FORWARD_BACKWARD_DEFAULT + 5))
+	if (Forward_Backward_Joystick_Motion >= (FORWARD_BACKWARD_DEFAULT - FLUCTUATION_DEFAULT) &&
+		Forward_Backward_Joystick_Motion <= (FORWARD_BACKWARD_DEFAULT + FLUCTUATION_DEFAULT))
 		Forward_Backward_Joystick_Motion = FORWARD_BACKWARD_DEFAULT;
 
 	if (Left_Right_Joystick_Motion_Old != Left_Right_Joystick_Motion)
@@ -587,7 +587,7 @@ void sendControlsToSubsea(byte& LeftRightArg, byte& FwdBwdArg, byte& UpDownArg, 
 		Send_Flag = FALSE;
 	}
 
-	delay(16);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(12);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
 	digitalWrite(PIN_LED_TX, LOW);			//send LED off
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }

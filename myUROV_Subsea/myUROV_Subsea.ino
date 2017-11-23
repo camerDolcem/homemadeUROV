@@ -32,7 +32,11 @@
 #define PIN_SERVO			7
 
 //pin definition for forw/backw movement
-#define PIN_MOTORS_FB		3
+#define PIN_MOTORS_FB		6
+//pin definition for lefft/right movement
+#define PIN_MOTORS_LR		5
+//pin definition for lefft/right movement
+#define PIN_MOTORS_UD		4
 
 //pin definition for RS485 serial comms
 #define PIN_RS485_MODE		12
@@ -42,6 +46,10 @@ Servo TiltServo;
 
 //fwd/bwd motors servo obj
 Servo MotorsFBServo;
+//l/r motors servo obj
+Servo MotorsLRServo;
+//up/down motors servo obj
+Servo MotorsUDServo;
 
 //commms watchdog time data
 uint32 Wdog_Timestamp = 0;
@@ -136,14 +144,14 @@ union WaterPressureImplicitCast
 //define variable for water ingress level value storage
 byte Water_Ingress_Storage;
 
-const byte Float_Size_In_Bytes = 4;						//size of byte array to store float, constant value
+const byte Float_Size_In_Bytes = 4;			//size of byte array to store float, constant value
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send measurements to Topside
 void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg)
 {
 	//Serial.println("sending:");
-	digitalWrite(PIN_RS485_MODE, HIGH);			//DE=RE=high transmit enabled
+	digitalWrite(PIN_RS485_MODE, HIGH);		//DE=RE=high transmit enabled
 	delay(2);
 
 	//send water temperature value
@@ -163,7 +171,7 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 	Serial.write(waterIngressArg);
 	Serial.write(STOP_WATERING_MSG_ID);
 
-	delay(16);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(12);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
 
@@ -171,25 +179,23 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 //define struct for received control messages 
 struct
 {
-	byte X_MVMT = LEFT_RIGHT_DEFAULT;			//0 - 128 -> left, 131 - center, 133 - 255 -> right
-	byte Y_MVMT = FORWARD_BACKWARD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> right
-	byte Z_MVMT = 0;			//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
-								//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
-
-	byte LIGHTS = 0;			//0 - lights OFF, 1 - lights ON
-
-	byte SERVO = 2;				//0 - reset to default (horizontal position), 1 - lower the position, 
-								//2 - do not change, 3 - raise the position
+	byte X_MVMT = LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
+	byte Y_MVMT = FORWARD_BACKWARD_DEFAULT;	//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
+	byte Z_MVMT = 0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
+											//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
+	byte LIGHTS = 0;						//0 - lights OFF, 1 - lights ON
+	byte SERVO = 2;							//0 - reset to default (horizontal position), 1 - lower the position, 
+											//2 - do not change, 3 - raise the position
 } controls;
 
 //define struct for mapped control messages into motion commands
 struct
 {
-	uint16 X_PWM_CMD = 1500;		//1000-1500us to turn left, 1500-2000us to turn right
-	uint16 Y_PWM_CMD = 1500;		//1000-1500us to go bwd, 1500-2000us to go fwd
-	uint16 Z_PWM_CMD = 1500;		//1000-1500us to rise, 1500-2000us to dive
-	bool LIGHTS_CMD = FALSE;		//TRUE to turn the lights on, FALSE to turn them off
-	byte SERVO_CMD = 80;			//position of the servo in deg
+	uint16 X_PWM_CMD = 1385;				//700-1285us to turn left, 1485-2000us to turn right
+	uint16 Y_PWM_CMD = 1385;				//700-1285us to go bwd, 1485-2000us to go fwd
+	uint16 Z_PWM_CMD = 1385;				//700-1285us to rise, 1485-2000us to dive
+	bool LIGHTS_CMD = FALSE;				//TRUE to turn the lights on, FALSE to turn them off
+	byte SERVO_CMD = 80;					//position of the servo in deg
 } commands;
 
 //define byte to store single byte from the message
@@ -197,7 +203,7 @@ byte Incoming_Byte = 0;
 
 //define the flags for sending the commands and for new data 
 bool SendCmd_Flag = FALSE;
-bool NewData_Flag;			//(if there is new data do not attempt to send packet to Topside
+bool NewData_Flag;							//if there is new incoming data, do not attempt to send packet to Topside
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //receive left/right, fwd/bwd,  up and down info
@@ -208,7 +214,7 @@ void receiveTopsideJoystickData()
 	else
 		NewData_Flag = FALSE;
 
-	while (Serial.available() >= 3)				//3 bytes is the biggest full message
+	while (Serial.available() >= 3)	//3 bytes is the biggest full message
 	{
 		//data is updated so send commands afterwards
 		//will not distinguish if that is noise coming but that is not something of major concern
@@ -296,6 +302,7 @@ void receiveTopsideJoystickData()
 
 
 bool Send_Motors_Cmd = TRUE;
+bool Send_Lights_Cmd = TRUE;
 bool Send_Servo_Cmd = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -304,16 +311,45 @@ void processControls()
 {
 	/* motors */
 
+	//X_MVMT
+	if (controls.X_MVMT < LEFT_RIGHT_DEFAULT)
+		commands.X_PWM_CMD = map(controls.X_MVMT, 0, 128, 700, 1285);
+	else if (controls.X_MVMT > LEFT_RIGHT_DEFAULT)
+		commands.X_PWM_CMD = map(controls.X_MVMT, 133, 255, 1485, 2000);
+	else
+		commands.X_PWM_CMD = 1385;
+
+	//Y_MVMT
+	if (controls.Y_MVMT < FORWARD_BACKWARD_DEFAULT){
+		commands.Y_PWM_CMD = map(controls.Y_MVMT, 0, 122, 700, 1285);
+		commands.Z_PWM_CMD = map(controls.Y_MVMT, 0, 122, 700, 1285);
+	}
+
+	else if (controls.Y_MVMT > FORWARD_BACKWARD_DEFAULT){
+		commands.Y_PWM_CMD = map(controls.Y_MVMT, 126, 255, 1485, 2000);
+		commands.Z_PWM_CMD = map(controls.Y_MVMT, 126, 255, 1485, 2000);
+	}
+	else{
+		commands.Y_PWM_CMD = 1385;
+		commands.Z_PWM_CMD = 1385;
+}
+
+	
+
+
 	Send_Motors_Cmd = TRUE;
 
 	/* lights */
 
-	if (controls.LIGHTS)
+	if (controls.LIGHTS == 1)
 		commands.LIGHTS_CMD = TRUE;
 	else
 		commands.LIGHTS_CMD = FALSE;
 
+	Send_Lights_Cmd = TRUE;
+
 	/* servo */
+
 	//reset
 	if (controls.SERVO == 0)
 	{
@@ -367,13 +403,20 @@ void sendCommands()
 {
 	/* motors */
 	if (Send_Motors_Cmd)
-		MotorsFBServo.writeMicroseconds(1375);
+	{
+		MotorsFBServo.writeMicroseconds(commands.Y_PWM_CMD);
+		MotorsLRServo.writeMicroseconds(commands.X_PWM_CMD);
+		MotorsUDServo.writeMicroseconds(commands.Z_PWM_CMD);
+	}
 
 	/* lights */
-	if (commands.LIGHTS_CMD)
-		digitalWrite(PIN_LIGHTS_SWITCH, HIGH);
-	else
-		digitalWrite(PIN_LIGHTS_SWITCH, LOW);
+	if (Send_Lights_Cmd)
+	{
+		if (commands.LIGHTS_CMD == TRUE)
+			digitalWrite(PIN_LIGHTS_SWITCH, HIGH);
+		else
+			digitalWrite(PIN_LIGHTS_SWITCH, LOW);
+	}
 
 	/* servo */
 	if (Send_Servo_Cmd)
@@ -472,11 +515,18 @@ void setup()
 	//set pins to input/output
 	pinMode(PIN_WATER_INGRESS, INPUT);					//analog input
 	pinMode(PIN_WATER_PRESSURE, INPUT);					//analog input
+
 	pinMode(PIN_LIGHTS_SWITCH, OUTPUT);					//lights switch
-	pinMode(PIN_MOTORS_FB, OUTPUT);
+
+	pinMode(PIN_MOTORS_FB, OUTPUT); 
+	pinMode(PIN_MOTORS_LR, OUTPUT);
+	pinMode(PIN_MOTORS_UD, OUTPUT);
+
 	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
 
 	MotorsFBServo.attach(PIN_MOTORS_FB);
+	MotorsLRServo.attach(PIN_MOTORS_LR);
+	MotorsUDServo.attach(PIN_MOTORS_UD);
 
 	//initiate motors, lights, servo with default commands
 	sendCommands();
