@@ -171,7 +171,7 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 	Serial.write(waterIngressArg);
 	Serial.write(STOP_WATERING_MSG_ID);
 
-	delay(12);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(15);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
 
@@ -194,7 +194,7 @@ struct
 	uint16 X_PWM_CMD = 1385;				//700-1285us to turn left, 1485-2000us to turn right
 	uint16 Y_PWM_CMD = 1385;				//700-1285us to go bwd, 1485-2000us to go fwd
 	uint16 Z_PWM_CMD = 1385;				//700-1285us to rise, 1485-2000us to dive
-	bool LIGHTS_CMD = FALSE;				//TRUE to turn the lights on, FALSE to turn them off
+	byte LIGHTS_CMD = 0;					//1 lights on, 0 lights off
 	byte SERVO_CMD = 80;					//position of the servo in deg
 } commands;
 
@@ -229,7 +229,13 @@ void receiveTopsideJoystickData()
 			{
 				Incoming_Byte = Serial.read();
 				if (Serial.read() == STOP_X_MSG_ID)
+				{
 					controls.X_MVMT = Incoming_Byte;
+
+					//reset the watchdog if there is uncorrupted data
+					Wdog_Timestamp = millis();
+				}
+
 				else
 					{}	//corrupted packet - ignore
 			}
@@ -274,20 +280,6 @@ void receiveTopsideJoystickData()
 					{}	//corrupted packet - ignore
 			}
 			break;			
-				
-			case START_WATCHDOG_MSG_ID:
-			{
-				Incoming_Byte = Serial.read();
-				if (Serial.read() == STOP_WATCHDOG_MSG_ID)
-				{
-					if (Incoming_Byte == WATCHDOG_MSG_ID)
-						//there is (meaningful, not corrupted) data, update watchdog
-						Wdog_Timestamp = millis();
-				}
-				else
-					{}	//corrupted packet - ignore
-			}
-			break;	
 
 			default:	//corrupted packet		
 			{ 
@@ -314,39 +306,69 @@ void processControls()
 	//X_MVMT
 	if (controls.X_MVMT < LEFT_RIGHT_DEFAULT)
 		commands.X_PWM_CMD = map(controls.X_MVMT, 0, 128, 700, 1285);
+
 	else if (controls.X_MVMT > LEFT_RIGHT_DEFAULT)
 		commands.X_PWM_CMD = map(controls.X_MVMT, 133, 255, 1485, 2000);
+
 	else
 		commands.X_PWM_CMD = 1385;
 
 	//Y_MVMT
-	if (controls.Y_MVMT < FORWARD_BACKWARD_DEFAULT){
+	if (controls.Y_MVMT < FORWARD_BACKWARD_DEFAULT)
 		commands.Y_PWM_CMD = map(controls.Y_MVMT, 0, 122, 700, 1285);
-		commands.Z_PWM_CMD = map(controls.Y_MVMT, 0, 122, 700, 1285);
-	}
 
-	else if (controls.Y_MVMT > FORWARD_BACKWARD_DEFAULT){
+	else if (controls.Y_MVMT > FORWARD_BACKWARD_DEFAULT)
 		commands.Y_PWM_CMD = map(controls.Y_MVMT, 126, 255, 1485, 2000);
-		commands.Z_PWM_CMD = map(controls.Y_MVMT, 126, 255, 1485, 2000);
-	}
-	else{
+
+	else
 		commands.Y_PWM_CMD = 1385;
+
+	//Z_MVMT
+	//reset
+	if (controls.Z_MVMT == 0)
+	{
 		commands.Z_PWM_CMD = 1385;
-}
+	}
 
-	
+	//slower/dive
+	else if (controls.Z_MVMT == 1)
+	{
+		if (commands.Z_PWM_CMD > 700)
+		{
+			commands.Z_PWM_CMD -= 1;
+		}
+	}
 
+	//faster/surface
+	else if (controls.Z_MVMT == 3)
+	{
+		if (commands.Z_PWM_CMD < 2000)
+		{
+			commands.Z_PWM_CMD += 1;
+		}
+	}
 
 	Send_Motors_Cmd = TRUE;
 
 	/* lights */
 
 	if (controls.LIGHTS == 1)
-		commands.LIGHTS_CMD = TRUE;
-	else
-		commands.LIGHTS_CMD = FALSE;
+	{
+		if (commands.LIGHTS_CMD == 0)	//send a command if lights are off
+		{
+			commands.LIGHTS_CMD = 1;
+			Send_Lights_Cmd = TRUE;
+		}
+	}
 
-	Send_Lights_Cmd = TRUE;
+	else								
+	{
+		if (commands.LIGHTS_CMD == 1)	//send a command if lights are on	
+		{
+			commands.LIGHTS_CMD = 0;
+			Send_Lights_Cmd = TRUE;
+		}
+	}
 
 	/* servo */
 
@@ -412,10 +434,13 @@ void sendCommands()
 	/* lights */
 	if (Send_Lights_Cmd)
 	{
-		if (commands.LIGHTS_CMD == TRUE)
+		if (commands.LIGHTS_CMD == 1)
 			digitalWrite(PIN_LIGHTS_SWITCH, HIGH);
+
 		else
 			digitalWrite(PIN_LIGHTS_SWITCH, LOW);
+
+		Send_Lights_Cmd = FALSE;
 	}
 
 	/* servo */
@@ -426,6 +451,9 @@ void sendCommands()
 
 		TiltServo.write(commands.SERVO_CMD);
 
+		Send_Servo_Cmd = FALSE;
+		
+		//to prevent jitter, deactivate the servo after movement
 		Deactivate_Servo_Timestamp = millis();
 		Detached_Flag = FALSE;
 	}
@@ -440,7 +468,7 @@ bool Stopped_Flag = FALSE;
 //checks when the last comms took place
 void watchdog(uint32& timestamp)
 {
-	if (long(timestamp - Wdog_Timestamp) > 5000)	//30secs lack of comms for Safety-Recovery to kick in
+	if (long(timestamp - Wdog_Timestamp) > 30000)	//30secs lack of comms for Safety-Recovery to kick in
 		//do not send command
 		safetyRecovery();
 	else
@@ -473,11 +501,8 @@ void safetyRecovery()
 {	
 	if (Recovering_Flag == FALSE) //trigger only once
 	{
-
-
-		//set z to some 1600
-
-		//Serial.println("SAFETY RECOVERY");
+		commands.Z_PWM_CMD = 1575;
+		sendCommands();
 
 		Recovering_Flag = TRUE;
 	}
@@ -491,18 +516,13 @@ void safetyRecovery()
 //checks when the last comms took place, if more than 10mins, starts surfacing
 void safetyStop()
 {
-
-
 	if (Stopped_Flag == FALSE && Recovering_Flag == FALSE) //trigger only once
 	{
-		//set x to 1500
-		//set y to 1500
-		//set z to 1500
+		commands.X_PWM_CMD = 1385;
+		commands.Y_PWM_CMD = 1385;
+		commands.Z_PWM_CMD = 1385;
+		sendCommands();
 		
-		//set z to some 1600
-
-		//Serial.println("SAFETY STOP");
-
 		Stopped_Flag = TRUE;
 	}
 }
@@ -598,10 +618,12 @@ void loop()
 	if (Deactivate_Flag)
 	{
 		if (!Detached_Flag)
+		{
 			TiltServo.detach();
 
-		Detached_Flag = TRUE;
-		Deactivate_Flag = FALSE;
+			Detached_Flag = TRUE;
+			Deactivate_Flag = FALSE;
+		}
 	}
 
 	//joystick stuff//////////////
