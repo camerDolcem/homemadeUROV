@@ -210,7 +210,10 @@ bool NewData_Flag;							//if there is new incoming data, do not attempt to send
 void receiveTopsideJoystickData()
 {	
 	if (Serial.available() >= 3)
+	{
 		NewData_Flag = TRUE;
+		Wdog_Timestamp = millis();
+	}
 	else
 		NewData_Flag = FALSE;
 
@@ -233,7 +236,7 @@ void receiveTopsideJoystickData()
 					controls.X_MVMT = Incoming_Byte;
 
 					//reset the watchdog if there is uncorrupted data
-					Wdog_Timestamp = millis();
+
 				}
 
 				else

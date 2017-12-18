@@ -542,6 +542,8 @@ void sendControlsToSubsea(byte& LeftRightArg, byte& FwdBwdArg, byte& UpDownArg, 
 {
 	digitalWrite(PIN_RS485_MODE, HIGH);		//DE=RE=high transmit enabled
 	digitalWrite(PIN_LED_TX, HIGH);			//send LED on
+
+	SendWdog_Timestamp = millis();
 	delay(2);
 
 	if (Send_Motors_Flag || Send_Flag)					//send movement related data
@@ -565,7 +567,7 @@ void sendControlsToSubsea(byte& LeftRightArg, byte& FwdBwdArg, byte& UpDownArg, 
 
 		//send packet to kick comms watchdog Subsea
 		//also in case motors commands got corrupted
-		SendWdog_Timestamp = millis();
+		//
 		Send_Flag = FALSE;
 	}
 
