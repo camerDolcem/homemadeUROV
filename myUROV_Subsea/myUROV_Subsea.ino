@@ -16,6 +16,7 @@
 #include <DallasTemperature.h>		//ds18b20 temp sensor library
 #include <Servo.h>
 
+
 //pin definition for water detection sensor
 #define PIN_WATER_INGRESS	A0
 
@@ -23,47 +24,49 @@
 #define PIN_WATER_PRESSURE	A1
 
 //pin definition for the relay
-#define PIN_LIGHTS_SWITCH	8
-
-//pin definition for 1-Wire bus
-#define PIN_ONE_WIRE_BUS	9
+#define PIN_LIGHTS_SWITCH	A2		//D14
 
 //pin definition for servo signal
-#define PIN_SERVO			7
+#define PIN_SERVO			A3		//D15
+
+//pin definition for 1-Wire bus
+#define PIN_ONE_WIRE_BUS	A4		//D16
+
+//pin definition for RS485 serial comms
+#define PIN_RS485_MODE		A5		//D17
 
 //pin definition for forw/backw movement
-#define PIN_MOTORS_FB		6
+#define PIN_MOTORS_FB		2
 //pin definition for lefft/right movement
-#define PIN_MOTORS_LR		5
+#define PIN_MOTORS_LR		3
 //pin definition for lefft/right movement
 #define PIN_MOTORS_UD		4
 
-//pin definition for RS485 serial comms
-#define PIN_RS485_MODE		12
-
-//tilt camera servo obj
+//tilt camera servo instance
 Servo TiltServo;
 
-//fwd/bwd motors servo obj
+//fwd/bwd motors servo instance
 Servo MotorsFBServo;
-//l/r motors servo obj
+//l/r motors servo instance
 Servo MotorsLRServo;
-//up/down motors servo obj
+//up/down motors servo instance
 Servo MotorsUDServo;
 
 //commms watchdog time data
+bool Get_Wdog_Timestamp = TRUE;
 uint32 Wdog_Timestamp = 0;
 
+
+OneWire OneWire(PIN_ONE_WIRE_BUS);		//setup 1-Wire bus
+DallasTemperature Sensors(&OneWire);	//setup temperature sensor with 1-Wire params
+DeviceAddress DeviceAddr;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //retrieves water temperature measurement via 1-Wire protocol in deg C and returns it in deg C
 float getWaterTemperature()
 {
-	OneWire OneWire(PIN_ONE_WIRE_BUS);						//setup 1-Wire bus
-	DallasTemperature Sensors(&OneWire);					//setup temperature sensor with 1-Wire params
-	Sensors.begin();										//locate devices on the bus
-	Sensors.requestTemperaturesByIndex(0);					//start conversion in ds18b20 sensor (the only device on the bus)
-	float water_temperature = Sensors.getTempCByIndex(0);	//assign temp (in deg C)
+	Sensors.requestTemperaturesByAddress(DeviceAddr);					//start conversion in ds18b20 sensor (the only device on the bus)
+	float water_temperature = Sensors.getTempC(DeviceAddr);	//assign temp (in deg C)
 											
 	return water_temperature;								//in degrees Celsius
 }
@@ -73,9 +76,10 @@ float getWaterTemperature()
 //retrieves water ingress level measurement as an analogue value and returns as mm value
 byte getWaterIngress()
 {
-	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
-	
 	byte water_ingress = 0;											//range 0 - 40mm
+
+	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
+	delay(1); //delay due to h/w limitations of the onboard ADC 
 
 	//scaling of the sensor
 	if (water_ingress_read <= 20)
@@ -85,9 +89,9 @@ byte getWaterIngress()
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
 
-	//Serial.print("water ingress reading: "); Serial.println(water_ingress_read);//debug
-	//Serial.print("water ingress in mm: "); 
-	//Serial.print(water_ingress);//debug
+	Serial.print("water ingress reading: "); Serial.println(water_ingress_read);//debug
+	Serial.print("water ingress in mm: "); 
+	Serial.print(water_ingress);//debug
 
 	return water_ingress;											//in mm
 }
@@ -97,7 +101,7 @@ byte getWaterIngress()
 //retrieves water pressure measurement as an analogue value and returns as Pa value
 float getWaterPressure()
 {
-	static const byte samples = 15;
+	static const byte samples = 10;
 	uint16 water_pressure_read[samples];
 	float water_pressure = 0.0;
 
@@ -105,10 +109,10 @@ float getWaterPressure()
 	for (byte i = 0; i < samples; i++)										
 		{
 			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
+			delay(1); //delay due to h/w limitations of the onboard ADC 
+			Serial.println(water_pressure_read[i]); //debug
 			
-			//Serial.println(water_pressure_read[i]); //debug
-			
-			if (water_pressure_read[i] < 116)
+			if (water_pressure_read[i] < 116) //reads up to 116 at 0.0m
 			{
 				//Serial.println(water_pressure_read[i]);//debug
 
@@ -148,11 +152,11 @@ const byte Float_Size_In_Bytes = 4;			//size of byte array to store float, const
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send measurements to Topside
-void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg)
+void sendPacket(byte waterTempArg[], byte waterPressArg[], const byte waterIngressArg)
 {
 	//Serial.println("sending:");
 	digitalWrite(PIN_RS485_MODE, HIGH);		//DE=RE=high transmit enabled
-	delay(2);
+	delay(3);
 
 	//send water temperature value
 	Serial.write(START_WATERTEMP_MSG_ID);
@@ -171,7 +175,7 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 	Serial.write(waterIngressArg);
 	Serial.write(STOP_WATERING_MSG_ID);
 
-	delay(15);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(7);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
 
@@ -180,7 +184,7 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], byte& waterIngressArg
 struct
 {
 	byte X_MVMT = LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
-	byte Y_MVMT = FORWARD_BACKWARD_DEFAULT;	//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
+	byte Y_MVMT = FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
 	byte Z_MVMT = 0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
 											//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
 	byte LIGHTS = 0;						//0 - lights OFF, 1 - lights ON
@@ -191,11 +195,11 @@ struct
 //define struct for mapped control messages into motion commands
 struct
 {
-	uint16 X_PWM_CMD = 1385;				//700-1285us to turn left, 1485-2000us to turn right
-	uint16 Y_PWM_CMD = 1385;				//700-1285us to go bwd, 1485-2000us to go fwd
-	uint16 Z_PWM_CMD = 1385;				//700-1285us to rise, 1485-2000us to dive
+	uint16 X_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to turn left, 1485-2000us to turn right
+	uint16 Y_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to go bwd, 1485-2000us to go fwd
+	uint16 Z_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to rise, 1485-2000us to dive
 	byte LIGHTS_CMD = 0;					//1 lights on, 0 lights off
-	byte SERVO_CMD = 80;					//position of the servo in deg
+	byte SERVO_CMD = SERVO_CMD_DEFAULT;		//position of the servo in deg
 } commands;
 
 //define byte to store single byte from the message
@@ -210,17 +214,14 @@ bool NewData_Flag;							//if there is new incoming data, do not attempt to send
 void receiveTopsideJoystickData()
 {	
 	if (Serial.available() >= 3)
-	{
 		NewData_Flag = TRUE;
-		Wdog_Timestamp = millis();
-	}
 	else
 		NewData_Flag = FALSE;
 
 	while (Serial.available() >= 3)	//3 bytes is the biggest full message
 	{
 		//data is updated so send commands afterwards
-		//will not distinguish if that is noise coming but that is not something of major concern
+		//will not distinguish if that is noise coming but that is not something of a concern
 		SendCmd_Flag = TRUE;
 
 		//process Rx buffer
@@ -235,8 +236,7 @@ void receiveTopsideJoystickData()
 				{
 					controls.X_MVMT = Incoming_Byte;
 
-					//reset the watchdog if there is uncorrupted data
-
+					Get_Wdog_Timestamp = TRUE;
 				}
 
 				else
@@ -248,7 +248,12 @@ void receiveTopsideJoystickData()
 			{
 				Incoming_Byte = Serial.read();
 				if (Serial.read() == STOP_Y_MSG_ID)
+				{
 					controls.Y_MVMT = Incoming_Byte;
+
+					Get_Wdog_Timestamp = TRUE;
+				}
+					
 				else
 					{}	//corrupted packet - ignore
 			}
@@ -258,7 +263,13 @@ void receiveTopsideJoystickData()
 			{
 				Incoming_Byte = Serial.read();
 				if (Serial.read() == STOP_Z_MSG_ID)
+				{
 					controls.Z_MVMT = Incoming_Byte;
+
+					Get_Wdog_Timestamp = TRUE;
+
+					//blink(1, 100); //debug
+				}
 				else
 					{}	//corrupted packet - ignore
 			}
@@ -268,7 +279,9 @@ void receiveTopsideJoystickData()
 			{
 				Incoming_Byte = Serial.read();
 				if (Serial.read() == STOP_LIGHTS_MSG_ID)
+				{
 					controls.LIGHTS = Incoming_Byte;
+				}
 				else
 					{}	//corrupted packet - ignore
 			}
@@ -288,7 +301,7 @@ void receiveTopsideJoystickData()
 			{ 
 				//Serial.println("Corrupted packet!");
 				//Serial.println("0");
-				blink(1, 10);
+				//blink(1, 10);
 			}
 				break;
 		}//switch
@@ -314,23 +327,23 @@ void processControls()
 		commands.X_PWM_CMD = map(controls.X_MVMT, 133, 255, 1485, 2000);
 
 	else
-		commands.X_PWM_CMD = 1385;
+		commands.X_PWM_CMD = PWM_CMD_DEFAULT;
 
 	//Y_MVMT
-	if (controls.Y_MVMT < FORWARD_BACKWARD_DEFAULT)
+	if (controls.Y_MVMT < FRWRD_BCKWRD_DEFAULT)
 		commands.Y_PWM_CMD = map(controls.Y_MVMT, 0, 122, 700, 1285);
 
-	else if (controls.Y_MVMT > FORWARD_BACKWARD_DEFAULT)
+	else if (controls.Y_MVMT > FRWRD_BCKWRD_DEFAULT)
 		commands.Y_PWM_CMD = map(controls.Y_MVMT, 126, 255, 1485, 2000);
 
 	else
-		commands.Y_PWM_CMD = 1385;
+		commands.Y_PWM_CMD = PWM_CMD_DEFAULT;
 
 	//Z_MVMT
 	//reset
 	if (controls.Z_MVMT == 0)
 	{
-		commands.Z_PWM_CMD = 1385;
+		commands.Z_PWM_CMD = PWM_CMD_DEFAULT;
 	}
 
 	//slower/dive
@@ -378,7 +391,7 @@ void processControls()
 	//reset
 	if (controls.SERVO == 0)
 	{
-		commands.SERVO_CMD = 80;
+		commands.SERVO_CMD = SERVO_CMD_DEFAULT;		//horizontal position
 		Send_Servo_Cmd = TRUE;
 	}
 
@@ -469,15 +482,20 @@ bool Stopped_Flag = FALSE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //checks when the last comms took place
-void watchdog(uint32& timestamp)
+void watchdog(uint32 timestamp)
 {
-	if (long(timestamp - Wdog_Timestamp) > 30000)	//30secs lack of comms for Safety-Recovery to kick in
-		//do not send command
+	if (Get_Wdog_Timestamp == TRUE)
+	{
+		Wdog_Timestamp = millis();
+		Get_Wdog_Timestamp = FALSE;
+	}
+
+	if ((long)(timestamp - Wdog_Timestamp) > RECOVERY_DELAY)	//time after last motors cmd received
 		safetyRecovery();
 	else
 		Recovering_Flag = FALSE;
 
-	if (long(timestamp - Wdog_Timestamp) > 5000)	//3sec lack of comms for Safety-Stop to kick in
+	if ((long)(timestamp - Wdog_Timestamp) > STOP_DELAY)		//time after last motors cmd received
 		safetyStop();
 	else
 		Stopped_Flag = FALSE;
@@ -486,7 +504,7 @@ void watchdog(uint32& timestamp)
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //blinker
-void blink(byte tuple, uint16 blinkspan)
+void blink(const byte tuple, const uint16 blinkspan)
 {
 	for (byte i = 0; i < tuple; i++)
 	{
@@ -504,7 +522,7 @@ void safetyRecovery()
 {	
 	if (Recovering_Flag == FALSE) //trigger only once
 	{
-		commands.Z_PWM_CMD = 1575;
+		commands.Z_PWM_CMD = PWM_CMD_DEFAULT + 200;
 		sendCommands();
 
 		Recovering_Flag = TRUE;
@@ -521,12 +539,14 @@ void safetyStop()
 {
 	if (Stopped_Flag == FALSE && Recovering_Flag == FALSE) //trigger only once
 	{
-		commands.X_PWM_CMD = 1385;
-		commands.Y_PWM_CMD = 1385;
-		commands.Z_PWM_CMD = 1385;
+		commands.X_PWM_CMD = PWM_CMD_DEFAULT;
+		commands.Y_PWM_CMD = PWM_CMD_DEFAULT;
+		commands.Z_PWM_CMD = PWM_CMD_DEFAULT;
 		sendCommands();
 		
 		Stopped_Flag = TRUE;
+
+		blink(1, 2000); //debug
 	}
 }
 
@@ -541,11 +561,11 @@ void setup()
 
 	pinMode(PIN_LIGHTS_SWITCH, OUTPUT);					//lights switch
 
+	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
+
 	pinMode(PIN_MOTORS_FB, OUTPUT); 
 	pinMode(PIN_MOTORS_LR, OUTPUT);
 	pinMode(PIN_MOTORS_UD, OUTPUT);
-
-	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
 
 	MotorsFBServo.attach(PIN_MOTORS_FB);
 	MotorsLRServo.attach(PIN_MOTORS_LR);
@@ -554,7 +574,13 @@ void setup()
 	//initiate motors, lights, servo with default commands
 	sendCommands();
 
-	Serial.begin(BITRATE, SERIAL_8E1);					//open Serial hardware port for RS485 comms
+	//initialise Dallas temp sensor - OneWire protocol
+	Sensors.begin();						//locate devices on the bus
+	Sensors.setWaitForConversion(FALSE);	//make it async
+	Sensors.getAddress(DeviceAddr, 0);
+	Sensors.setResolution(DeviceAddr, 10);
+
+	Serial.begin(BITRATE, SERIAL_SETTINGS);					//open Serial hardware port for RS485 comms
 } //end of setup
 
 
@@ -576,15 +602,15 @@ void loop()
 	Cycle_Timestamp = millis();
 
 	//set flag for measurements update (time in ms)
-	if (Cycle_Timestamp - Measurements_Timestamp > 1200)
+	if (Cycle_Timestamp - Measurements_Timestamp > MSRMTS_SUBSEA_UPDATE)
 		Measurements_Flag = TRUE;
 
 	//set flag for sending telemetry data to Topside (time in ms)
-	if (Cycle_Timestamp - Send_Timestamp > 1300)
+	if (Cycle_Timestamp - Send_Timestamp > SEND_MSRMTS_INTERVAL)
 		SendPacket_Flag = TRUE;
 
 	//set flag for deactivating the servo SIG pin (time in ms)
-	if (long(Cycle_Timestamp - Deactivate_Servo_Timestamp) > 500)
+	if (long(Cycle_Timestamp - Deactivate_Servo_Timestamp) > SERVO_STOP)
 		Deactivate_Flag = TRUE;
 
 	/* set all time-based flags for each cycle execution */
@@ -637,7 +663,7 @@ void loop()
 	//Serial.print("Y = "); Serial.println(controls.Y_MVMT); 
 	//Serial.print("LIGHTS = "); Serial.println(controls.LIGHTS); 
 
-	watchdog(Cycle_Timestamp);
+	//watchdog(Cycle_Timestamp);
 
 } //end of loop
 

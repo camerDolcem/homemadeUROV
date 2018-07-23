@@ -18,6 +18,7 @@
 #include <DS1307RTC.h>						//Real Time Clock library
 #include <Adafruit_BMP280.h>				//air pressure and temperature sensor library
 
+
 //pins definition for TFT screen
 #define PIN_CS					53			//connects to CS pin
 #define PIN_RST					50			//connects to RESET pin
@@ -53,6 +54,7 @@
 TFT MyTFT = TFT(PIN_CS, PIN_DC, PIN_RST);	
 
 //commms watchdog time data
+bool Get_Wdog_Timestamp = TRUE;
 uint32 Wdog_Timestamp = 0;		//Topside controller
 
 uint32 SendWdog_Timestamp = 0;	//to send to Subsea controller
@@ -167,18 +169,24 @@ void dispDate()
 }
 
 
+Adafruit_BMP280 BMP;	//I2C protocol used
+bool foundBmpSensor = FALSE;
+
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //display air pressure and temperature
 void dispAirTemperatureAndPressure()
 {
-	Adafruit_BMP280 BMP;
 	float air_temperature = 0;
 	float air_pressure = 0;
 
-	if (BMP.begin())
+	if (foundBmpSensor)
 	{
 		air_temperature = (BMP.readTemperature() - 1.2);
 		air_pressure = BMP.readPressure();
+	}
+	else	//try to locate lost sensor
+	{
+		foundBmpSensor = BMP.begin();
 	}
 
 	//temperature
@@ -211,76 +219,99 @@ byte Received_Packet_New[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1 };
 
 //define byte to store single byte from the message
 byte Incoming_Byte = 0;
+uint32 Rx_Good = 0; //debug
+uint32 Rx_Incomplete = 0; //debug
+uint32 Rx_Rubbish = 0; //debug
+bool dispStats = TRUE; //debug
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //receive water pressure, temperature and leak level data
 void receiveSubseaTelemetryData()
 {
-	while (Serial1.available() >= 6)		//6 bytes defines biggest msg - float (1+4+1)
+	while (Serial3.available() >= 6)		//6 bytes defines biggest msg - float (1+4+1)
 	{	
 		digitalWrite(PIN_LED_RX, HIGH);		//receive LED on
 
 		//process Rx buffer
-		Incoming_Byte = Serial1.read();
+		Incoming_Byte = Serial3.read();
 
 		switch (Incoming_Byte)
 			{
 				case START_WATERTEMP_MSG_ID:
 				{
-					Serial1.readBytes((Received_Packet_New + 0), 4);
-					if (Serial1.read() == STOP_WATERTEMP_MSG_ID)
+					Serial3.readBytes((Received_Packet_New + 0), 4);
+					if (Serial3.read() == STOP_WATERTEMP_MSG_ID)
 					{
 						for (byte i = 0; i < 4; i++)
 							Received_Packet[i] = Received_Packet_New[i];
+
+						Rx_Good++; //debug
 					}
 
-					else
+					else	//corrupted packet - ignore
 					{
-						beep(6, 100); Serial.println("Corrupted packet TEMP");
-					}	//corrupted packet - ignore
+						//beep(1, 100); Serial3.println("Corrupted packet TEMP"); //debug
+						Rx_Incomplete++; //debug
+						dispStats = TRUE; //debug
+					}	
 				}
 				break;
 							
 				case START_WATERPRESS_MSG_ID:
 				{
-					Serial1.readBytes((Received_Packet_New + 4), 4);
-					if (Serial1.read() == STOP_WATERPRESS_MSG_ID)
+					Serial3.readBytes((Received_Packet_New + 4), 4);
+					if (Serial3.read() == STOP_WATERPRESS_MSG_ID)
 					{
 						for (byte i = 4; i < 8; i++)
 							Received_Packet[i] = Received_Packet_New[i];
+
+						Rx_Good++; //debug
+
 					}
 
-					else
+					else	//corrupted packet - ignore
 					{
-						beep(4, 100); Serial.println("Corrupted packet PRESS");
-					}	//corrupted packet - ignore
+						//beep(1, 100); Serial3.println("Corrupted packet PRESS");
+						Rx_Incomplete++; //debug
+						dispStats = TRUE; //debug
+
+					}	
 				}
 				break;
 
 				case START_WATERING_MSG_ID:
 				{
-					Received_Packet_New[8] = Serial1.read();
-					if (Serial1.read() == STOP_WATERING_MSG_ID)
+					Received_Packet_New[8] = Serial3.read();
+					if (Serial3.read() == STOP_WATERING_MSG_ID)
 					{
 						Received_Packet[8] = Received_Packet_New[8];
 
-						Serial.println("Water ingress received OK");
+						//Serial3.println("Water ingress received OK"); //debug
 						//when water ingress info is received, kick the watchdog
-						Wdog_Timestamp = millis();
+						Get_Wdog_Timestamp = TRUE;
+						Rx_Good++; //debug
+
 					}
 
 					else
 					{
-						beep(2, 100); Serial.println("Corrupted packet INGRESS");
-					}		//corrupted packet - ignore 
+						//beep(1, 100); Serial3.println("Corrupted packet INGRESS");
+						Rx_Incomplete++; //debug
+						dispStats = TRUE; //debug
+
+					}	//corrupted packet - ignore 
 				}
 				break;
 
 				default:	//corrupted packet								
 				{
-					beep(1, 100); 
-					Serial.print("Corrupted packet, buffer: ");
-					Serial.println(Serial1.available()); 
+					//beep(1, 25); //debug
+					//Serial3.print("Corrupted packet, buffer: ");
+					//Serial3.println(Serial3.available()); 
+					Rx_Rubbish++; //debug
+					dispStats = TRUE; //debug
+
+
 				}
 				break;
 			
@@ -358,7 +389,7 @@ void setWaterLeakAlarm()
 //define variables for initial values corresponding to joystick default position readings
 //movement
 byte Left_Right_Joystick_Motion = LEFT_RIGHT_DEFAULT;
-byte Forward_Backward_Joystick_Motion = FORWARD_BACKWARD_DEFAULT;
+byte Forward_Backward_Joystick_Motion = FRWRD_BCKWRD_DEFAULT;
 byte Up_Button_Motion = 1;
 byte Down_Button_Motion = 1;
 byte UpDown_Button_Reset = 1;
@@ -392,29 +423,32 @@ void getCmd()
 {
 	/* motors */
 
-	//fwd/bwd
+	//read in the joystick position, map to 1 byte size value
+	Left_Right_Joystick_Motion = map( analogRead(PIN_JOYSTICK_X), 0, 1023, 0, 255 );
+	Forward_Backward_Joystick_Motion = map( analogRead(PIN_JOYSTICK_Y), 0, 1023, 0, 255 );
 
-	Left_Right_Joystick_Motion = map(analogRead(PIN_JOYSTICK_X), 0, 1023, 0, 255);
-	Forward_Backward_Joystick_Motion = map(analogRead(PIN_JOYSTICK_Y), 0, 1023, 0, 255);
+	//take into account fluctuations on analog signal from the joystick when it is static
+	//both when it is in its default (zero) position and when it swerved
 
-	//take into account fluctuations on analog signal from the joystick
+	//FWD/BWD
+	if ( Forward_Backward_Joystick_Motion >= (FRWRD_BCKWRD_DEFAULT - FLUCTUATION_ZERO ) &&
+		Forward_Backward_Joystick_Motion <= (FRWRD_BCKWRD_DEFAULT + FLUCTUATION_ZERO ) )
+		Forward_Backward_Joystick_Motion = FRWRD_BCKWRD_DEFAULT;
 
-	if (Forward_Backward_Joystick_Motion >= (FORWARD_BACKWARD_DEFAULT - FLUCTUATION_DEFAULT) &&
-		Forward_Backward_Joystick_Motion <= (FORWARD_BACKWARD_DEFAULT + FLUCTUATION_DEFAULT))
-		Forward_Backward_Joystick_Motion = FORWARD_BACKWARD_DEFAULT;
-
-	if (Forward_Backward_Joystick_Motion_Old != Forward_Backward_Joystick_Motion)
+	if ( Forward_Backward_Joystick_Motion >= Forward_Backward_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
+		Forward_Backward_Joystick_Motion <= Forward_Backward_Joystick_Motion_Old - FLUCTUATION_NONZERO )
 	{
 		Forward_Backward_Joystick_Motion_Old = Forward_Backward_Joystick_Motion;
 		Send_Motors_Flag = TRUE;
 	}
 	
 	//left/right
-	if (Left_Right_Joystick_Motion >= (LEFT_RIGHT_DEFAULT - FLUCTUATION_DEFAULT) &&
-		Left_Right_Joystick_Motion <= (LEFT_RIGHT_DEFAULT + FLUCTUATION_DEFAULT))
+	if (Left_Right_Joystick_Motion >= (LEFT_RIGHT_DEFAULT - FLUCTUATION_ZERO) &&
+		Left_Right_Joystick_Motion <= (LEFT_RIGHT_DEFAULT + FLUCTUATION_ZERO))
 		Left_Right_Joystick_Motion = LEFT_RIGHT_DEFAULT;
 
-	if (Left_Right_Joystick_Motion_Old != Left_Right_Joystick_Motion)
+	if ( Left_Right_Joystick_Motion >= Left_Right_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
+		 Left_Right_Joystick_Motion <= Left_Right_Joystick_Motion_Old - FLUCTUATION_NONZERO )
 	{
 		Left_Right_Joystick_Motion_Old = Left_Right_Joystick_Motion;
 		Send_Motors_Flag = TRUE;
@@ -538,58 +572,55 @@ void getCmd()
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send joystick translated motion data to Subsea
-void sendControlsToSubsea(byte& LeftRightArg, byte& FwdBwdArg, byte& UpDownArg, byte& LightsArg, byte& ServoArg)
+void sendControlsToSubsea(const byte LeftRightArg, const byte FwdBwdArg, const byte UpDownArg, const byte LightsArg, const byte ServoArg)
 {
 	digitalWrite(PIN_RS485_MODE, HIGH);		//DE=RE=high transmit enabled
 	digitalWrite(PIN_LED_TX, HIGH);			//send LED on
 
-	SendWdog_Timestamp = millis();
-	delay(2);
+	delay(3);
 
 	if (Send_Motors_Flag || Send_Flag)					//send movement related data
 	{
 		//send Forward/Backword motion data
-		Serial1.write(START_X_MSG_ID);
-		Serial1.write(LeftRightArg);
-		Serial1.write(STOP_X_MSG_ID);
+		Serial3.write(START_X_MSG_ID);
+		Serial3.write(LeftRightArg);
+		Serial3.write(STOP_X_MSG_ID);
 
 		//send Left/Right motion data
-		Serial1.write(START_Y_MSG_ID);
-		Serial1.write(FwdBwdArg);
-		Serial1.write(STOP_Y_MSG_ID);
+		Serial3.write(START_Y_MSG_ID);
+		Serial3.write(FwdBwdArg);
+		Serial3.write(STOP_Y_MSG_ID);
 
 		//send Up/Down motion data
-		Serial1.write(START_Z_MSG_ID);
-		Serial1.write(UpDownArg);
-		Serial1.write(STOP_Z_MSG_ID);
+		Serial3.write(START_Z_MSG_ID);
+		Serial3.write(UpDownArg);
+		Serial3.write(STOP_Z_MSG_ID);
 
 		Send_Motors_Flag = FALSE;
-
-		//send packet to kick comms watchdog Subsea
-		//also in case motors commands got corrupted
-		//
 		Send_Flag = FALSE;
+
+		SendWdog_Timestamp = millis();
 	}
 
 	if (Send_Lights_Flag)					//send lights on/off data
 	{
-		Serial1.write(START_LIGHTS_MSG_ID);
-		Serial1.write(LightsArg);
-		Serial1.write(STOP_LIGHTS_MSG_ID);
+		Serial3.write(START_LIGHTS_MSG_ID);
+		Serial3.write(LightsArg);
+		Serial3.write(STOP_LIGHTS_MSG_ID);
 
 		Send_Lights_Flag = FALSE;
 	}
 
 	if (Send_Servo_Flag)					//send servo positioning data
 	{
-		Serial1.write(START_SERVO_MSG_ID);
-		Serial1.write(ServoArg);
-		Serial1.write(STOP_SERVO_MSG_ID);
+		Serial3.write(START_SERVO_MSG_ID);
+		Serial3.write(ServoArg);
+		Serial3.write(STOP_SERVO_MSG_ID);
 
 		Send_Servo_Flag = FALSE;
 	}
 
-	delay(12);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(7);								//6ms to clock out last three bytes for bitrate >= 28800 min
 	digitalWrite(PIN_LED_TX, LOW);			//send LED off
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
@@ -614,16 +645,23 @@ bool Beep_Flag = FALSE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //checks when the last comms took place
-void watchdog(uint32& timestamp)
+void watchdog(const uint32 timestamp)
 {
-	if (long(timestamp - Wdog_Timestamp) > 10000) //10secs lack of comms to zero the displayed data
+	//check if comms were ok
+	if (Get_Wdog_Timestamp == TRUE)
+	{
+		Wdog_Timestamp = millis();
+		Get_Wdog_Timestamp = FALSE;
+	}
+
+	if (long(timestamp - Wdog_Timestamp) > ZERO_DATA_DELAY) // lack of comms; zero the displayed data
 	{
 		if (!Beep_Flag)	//beep only once
 		{
 			for (byte i = 0; i < sizeof(Received_Packet); i++)
 				Received_Packet[i] = 0;
 
-			beep(1, 3000);
+			beep(1, ZERO_DATA_BEEP);
 		}
 
 		Beep_Flag = TRUE;
@@ -720,11 +758,15 @@ void setup()
 	digitalWrite(PIN_BUTTON_SERVO_DOWN, HIGH);
 	digitalWrite(PIN_BUTTON_SERVO_RESET, HIGH);
 
+	//locate BMP air/press sensor - I2C protocol
+	foundBmpSensor = BMP.begin();
+
 	//RS485
 	pinMode(PIN_RS485_MODE, OUTPUT);		//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
-	Serial1.begin(BITRATE, SERIAL_8E1);		//open Serial Port for RS485 comms
+	Serial3.begin(BITRATE, SERIAL_SETTINGS);		//open Serial Port for RS485 comms
 
 	Serial.begin(BITRATE); 	//debug
+	Serial.print("Bitrate: "); Serial.println(BITRATE); //debug
 
 }//end of setup
 
@@ -748,20 +790,20 @@ void loop()
 	Cycle_Timestamp = millis();
 
 	//set flag for runtime update (in ms)
-	if (Cycle_Timestamp - Runtime_Timestamp > 1000)
+	if (Cycle_Timestamp - Runtime_Timestamp > RUNTIME_UPDATE)
 		RunTime_Flag = TRUE;
 
 	//set flag for current time update (in ms)
-	if (Cycle_Timestamp - Time_Timestamp > 15000)
+	if (Cycle_Timestamp - Time_Timestamp > TIME_UPDATE)
 		Time_Flag = TRUE;
 
 	//set flag for measurements update (in ms)
-	if (Cycle_Timestamp - Measurements_Timestamp > 2500)
+	if (Cycle_Timestamp - Measurements_Timestamp > MSRMTS_TOPSIDE_UPDATE)
 		Measurements_Flag = TRUE;
 
 	//set flag to force sending the joystick data, in case last updated packet was not received by Subsea
 	//prevents Auto-Stop Subsea Safety System as well as Auto-Recovery Subsea Safety System to be triggered 
-	if (Cycle_Timestamp - SendWdog_Timestamp > 2848)
+	if (Cycle_Timestamp - SendWdog_Timestamp > SEND_CMDS_INTERVAL)
 		Send_Flag = TRUE;
 
 	if (RunTime_Flag)
@@ -798,7 +840,7 @@ void loop()
 
 	getCmd();
 
-	if (!Send_Flag && !Send_Motors_Flag && !Send_Lights_Flag && !Send_Servo_Flag)
+	if (!Send_Flag)
 	{
 		receiveSubseaTelemetryData();
 	}
@@ -821,22 +863,33 @@ void loop()
 	//uint16 butsres = digitalRead(PIN_BUTTON_SERVO_RESET);
 	//uint16 butsurface = digitalRead(PIN_JOYSTICK_Z);
 
-	//Serial.print("UP = ");  Serial.print(Up_Button_Motion); Serial.print("\t");
-	//Serial.print("DOWN = "); Serial.println(Down_Button_Motion); 
+	//Serial3.print("UP = ");  Serial3.print(Up_Button_Motion); Serial3.print("\t");
+	//Serial3.print("DOWN = "); Serial3.println(Down_Button_Motion); 
 	//if (Left_Right_Joystick_Motion != 131 || Forward_Backward_Joystick_Motion != 124)
 	//{
-	//	Serial.print("X = "); Serial.print(Left_Right_Joystick_Motion); Serial.print("\t");
-	//	Serial.print("Y = "); Serial.println(Forward_Backward_Joystick_Motion);
+	//	Serial3.print("X = "); Serial3.print(Left_Right_Joystick_Motion); Serial3.print("\t");
+	//	Serial3.print("Y = "); Serial3.println(Forward_Backward_Joystick_Motion);
 	//}
-	//Serial.print("SERVO DOWN = "); Serial.print(butsdown); Serial.print("\t");
-	//Serial.print("SERVO UP = "); Serial.println(butsup);
-	//Serial.print("SERVO RESET = "); Serial.println(butsres);
-	//Serial.print("SURFACE (Z) = "); Serial.println(butsurface);
+	//Serial3.print("SERVO DOWN = "); Serial3.print(butsdown); Serial3.print("\t");
+	//Serial3.print("SERVO UP = "); Serial3.println(butsup);
+	//Serial3.print("SERVO RESET = "); Serial3.println(butsres);
+	//Serial3.print("SURFACE (Z) = "); Serial3.println(butsurface);
 	//delay(500);
 
-	//Serial.println("WTF");
+	//Serial3.println("WTF");
 
 	//beep(1, 750);
+	//DEBUG:
+	if (dispStats == true)
+	{
+		
+		Serial.print("Rx GOOD: "); Serial.print(Rx_Good);
+		Serial.print(" Rx Incomplete: "); Serial.print(Rx_Incomplete);
+		Serial.print(" Rx Corrupted: "); Serial.println(Rx_Rubbish);
+		Serial.print("Rx GOOD : Rx BAD  "); Serial.print(Rx_Good / (Rx_Incomplete + Rx_Rubbish)); Serial.print(":");
+		Serial.println(1);
+		dispStats = false;
+	}
 
 }//end of loop
 
