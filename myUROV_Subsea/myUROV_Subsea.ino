@@ -1,71 +1,73 @@
 /***********************************************************************************
- Name:
-     myUROV_Subsea.ino
- Description:
-     Subsea controller
- Version:
-     01
- Created:
-	2017
- By:
-	Jakub Kurkowski
+	Name:
+		myUROV_Subsea.ino
+	Description:
+		Subsea (underwater) controller functionality implementation.
+	Version:
+		1.0
+	Created:
+		Jul 2018
+	By:
+		Jakub Kurkowski
 ***********************************************************************************/
 
 #include "defs.h"
 #include "msgID.h"
-#include <DallasTemperature.h>		//ds18b20 temp sensor library
-#include <Servo.h>
+									//device				protocol	controller interface pins
+#include <DallasTemperature.h>		//temperature sensor	1-Wire		any	DIO 	
+#include <Servo.h>					//servo					N/A
 
+/*
+ * interface connection defs
+ */
 
-//pin definition for water detection sensor
-#define PIN_WATER_INGRESS	A0
+//analogue input signals
+#define PIN_WATER_INGRESS	A0		//water detection sensor
+#define PIN_WATER_PRESSURE	A1		//pressure transducer
 
-//pin definition for pressure transducer
-#define PIN_WATER_PRESSURE	A1
+//light switch
+#define PIN_LIGHTS_SWITCH	8		//MOSFET driver
 
-//pin definition for the relay
-#define PIN_LIGHTS_SWITCH	A2		//D14
+//camera tilt servo control
+#define PIN_SERVO			9		
 
-//pin definition for servo signal
-#define PIN_SERVO			A3		//D15
+//motors controls - 3DOF
+#define PIN_MOTORS_FB		5		//forward/backward
+#define PIN_MOTORS_LR		6		//yaw
+#define PIN_MOTORS_UD		7		//up/down (surface/dive)
 
-//pin definition for 1-Wire bus
-#define PIN_ONE_WIRE_BUS	A4		//D16
+//comms
+#define PIN_ONE_WIRE_BUS	10		//1-Wire bus		
+#define PIN_RS485_MODE		11		//Rx/Tx select
 
-//pin definition for RS485 serial comms
-#define PIN_RS485_MODE		A5		//D17
+/*
+* global objects, flags and other vars
+*/
 
-//pin definition for forw/backw movement
-#define PIN_MOTORS_FB		2
-//pin definition for lefft/right movement
-#define PIN_MOTORS_LR		3
-//pin definition for lefft/right movement
-#define PIN_MOTORS_UD		4
+//temperature sensor setup
+OneWire OneWire(PIN_ONE_WIRE_BUS);	//1-Wire bus
+DallasTemperature Sensors(&OneWire);//sets bus defaults
+DeviceAddress DeviceAddr;			//1-Wire device address 
 
-//tilt camera servo instance
-Servo TiltServo;
+//servos - speed/angle control
+Servo TiltServo;					//camera servo position control
+Servo MotorsFB;						//forward/backward		
+Servo MotorsLR;						//left/right (yaw)
+Servo MotorsUD;						//up down (surface/dive)
 
-//fwd/bwd motors servo instance
-Servo MotorsFBServo;
-//l/r motors servo instance
-Servo MotorsLRServo;
-//up/down motors servo instance
-Servo MotorsUDServo;
-
-//commms watchdog time data
+//commms watchdog updates
 bool Get_Wdog_Timestamp = TRUE;
 uint32 Wdog_Timestamp = 0;
 
-
-OneWire OneWire(PIN_ONE_WIRE_BUS);		//setup 1-Wire bus
-DallasTemperature Sensors(&OneWire);	//setup temperature sensor with 1-Wire params
-DeviceAddress DeviceAddr;
+/*
+*  functions
+*/
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //retrieves water temperature measurement via 1-Wire protocol in deg C and returns it in deg C
 float getWaterTemperature()
 {
-	Sensors.requestTemperaturesByAddress(DeviceAddr);					//start conversion in ds18b20 sensor (the only device on the bus)
+	Sensors.requestTemperaturesByAddress(DeviceAddr);		//start conversion in ds18b20 sensor (the only device on the bus)
 	float water_temperature = Sensors.getTempC(DeviceAddr);	//assign temp (in deg C)
 											
 	return water_temperature;								//in degrees Celsius
@@ -89,9 +91,9 @@ byte getWaterIngress()
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
 
-	Serial.print("water ingress reading: "); Serial.println(water_ingress_read);//debug
-	Serial.print("water ingress in mm: "); 
-	Serial.print(water_ingress);//debug
+	//Serial.print("water ingress reading: "); Serial.println(water_ingress_read);//debug
+	//Serial.print("water ingress in mm: "); 
+	//Serial.print(water_ingress);//debug
 
 	return water_ingress;											//in mm
 }
@@ -110,7 +112,7 @@ float getWaterPressure()
 		{
 			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
 			delay(1); //delay due to h/w limitations of the onboard ADC 
-			Serial.println(water_pressure_read[i]); //debug
+			//Serial.println(water_pressure_read[i]); //debug
 			
 			if (water_pressure_read[i] < 116) //reads up to 116 at 0.0m
 			{
@@ -301,7 +303,7 @@ void receiveTopsideJoystickData()
 			{ 
 				//Serial.println("Corrupted packet!");
 				//Serial.println("0");
-				//blink(1, 10);
+				blink(1, 25);
 			}
 				break;
 		}//switch
@@ -429,11 +431,23 @@ void processControls()
 	}
 }
 
-
 //global data for deactivation of the (jittering) servo (holds position)
 uint32 Deactivate_Servo_Timestamp = 0;
 bool Deactivate_Flag = FALSE;
 bool Detached_Flag = FALSE;
+
+bool Recovering_Flag = FALSE;
+bool Stopped_Flag = FALSE;
+
+//global data defining how often to retrieve and send data
+uint32 Cycle_Timestamp = 0;	//timestamp of each separate cycle to compare against to
+
+uint32 Measurements_Timestamp = 0;
+bool Measurements_Flag = TRUE;
+
+uint32 Send_Timestamp = 0;
+bool SendPacket_Flag = TRUE;
+
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send commands to motors, lights, camera servo
@@ -442,9 +456,9 @@ void sendCommands()
 	/* motors */
 	if (Send_Motors_Cmd)
 	{
-		MotorsFBServo.writeMicroseconds(commands.Y_PWM_CMD);
-		MotorsLRServo.writeMicroseconds(commands.X_PWM_CMD);
-		MotorsUDServo.writeMicroseconds(commands.Z_PWM_CMD);
+		MotorsFB.writeMicroseconds(commands.Y_PWM_CMD);
+		MotorsLR.writeMicroseconds(commands.X_PWM_CMD);
+		MotorsUD.writeMicroseconds(commands.Z_PWM_CMD);
 	}
 
 	/* lights */
@@ -476,9 +490,6 @@ void sendCommands()
 
 }
 
-
-bool Recovering_Flag = FALSE;
-bool Stopped_Flag = FALSE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //checks when the last comms took place
@@ -556,42 +567,33 @@ void safetyStop()
 void setup()
 {	
 	//set pins to input/output
-	pinMode(PIN_WATER_INGRESS, INPUT);					//analog input
-	pinMode(PIN_WATER_PRESSURE, INPUT);					//analog input
+	pinMode(PIN_WATER_INGRESS, INPUT);		//analog input
+	pinMode(PIN_WATER_PRESSURE, INPUT);		//analog input
 
-	pinMode(PIN_LIGHTS_SWITCH, OUTPUT);					//lights switch
+	pinMode(PIN_LIGHTS_SWITCH, OUTPUT);		//lights switch
 
-	pinMode(PIN_RS485_MODE, OUTPUT);					//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
+	pinMode(PIN_RS485_MODE, OUTPUT);		//DE/RE Data Enable/Receive Enable - transmit/receive pin set to output
 
 	pinMode(PIN_MOTORS_FB, OUTPUT); 
 	pinMode(PIN_MOTORS_LR, OUTPUT);
 	pinMode(PIN_MOTORS_UD, OUTPUT);
 
-	MotorsFBServo.attach(PIN_MOTORS_FB);
-	MotorsLRServo.attach(PIN_MOTORS_LR);
-	MotorsUDServo.attach(PIN_MOTORS_UD);
+	MotorsFB.attach(PIN_MOTORS_FB);
+	MotorsLR.attach(PIN_MOTORS_LR);
+	MotorsUD.attach(PIN_MOTORS_UD);
 
 	//initiate motors, lights, servo with default commands
 	sendCommands();
 
 	//initialise Dallas temp sensor - OneWire protocol
 	Sensors.begin();						//locate devices on the bus
-	Sensors.setWaitForConversion(FALSE);	//make it async
+	Sensors.setWaitForConversion(FALSE);	//make it async, don't wait for conversion
 	Sensors.getAddress(DeviceAddr, 0);
-	Sensors.setResolution(DeviceAddr, 10);
+	Sensors.setResolution(DeviceAddr, 10);	//10bit resolution is ~3x fater than 12bit and accurate enough
 
-	Serial.begin(BITRATE, SERIAL_SETTINGS);					//open Serial hardware port for RS485 comms
+	Serial.begin(BITRATE, SERIAL_SETTINGS);	//open Serial hardware port for RS485 comms
 } //end of setup
 
-
-//global data defining how often to retrieve and send data
-uint32 Cycle_Timestamp = 0;	//timestamp of each separate cycle to compare against to
-
-uint32 Measurements_Timestamp = 0;
-bool Measurements_Flag = TRUE;
-
-uint32 Send_Timestamp = 0;
-bool SendPacket_Flag = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //main program
@@ -663,11 +665,12 @@ void loop()
 	//Serial.print("Y = "); Serial.println(controls.Y_MVMT); 
 	//Serial.print("LIGHTS = "); Serial.println(controls.LIGHTS); 
 
-	//watchdog(Cycle_Timestamp);
+	//watchdog(Cycle_Timestamp); //TURN THIS ON AFTER TESTS 
 
-} //end of loop
+	/*while (Serial.available())
+	{
+		blink(1, 10);
+		Serial.read();
+	}*/
 
-
-
-
-
+} //loop

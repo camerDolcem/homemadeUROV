@@ -1,70 +1,102 @@
 /***********************************************************************************
- Name:
-     myUROV_Subsea.ino
- Description:
-     Topside controller
- Version:
-     01
- Created:
-	2017
- By:
-	Jakub Kurkowski
+	Name:
+		myUROV_Subsea.ino
+	Description:
+		Topside (surface) controller functionality implementation.
+	Version:
+		1.0
+	Created:
+		Jul 2018
+	By:
+		Jakub Kurkowski
 ***********************************************************************************/
 
 #include "defs.h"
 #include "msgID.h"
+											//device					protocol	interface pins (controller)
+#include <DS1307RTC.h>						//Real Time Clock module	I2C			SCL and SDA hardware pins 
+#include <Adafruit_BMP280.h>				//atmospheric PT sensor		I2C			SCL and SDA hardware pins
+#include <TFT.h>							//TFT LCD display			SPI			MISO, MOSI, SCL, SS hardware pins
 
-#include <TFT.h>							//LCD TFT library
-#include <DS1307RTC.h>						//Real Time Clock library
-#include <Adafruit_BMP280.h>				//air pressure and temperature sensor library
+/*
+ * interface connection defs
+ */
 
+//LCD										//device interface pins (LCD)
+#define PIN_SS					53			//CS (Chip (aka Slave) Select)
+#define PIN_MISO				50			//RESET
+#define PIN_DC					48			//A0 (Data/Command select)
+//hardware pin SCK (Serial Clock) 			//SCK (SPI Clock input)	
+//hardware pin MOSI (Master Out Slave In)  	//SDA (SPI Data input)
 
-//pins definition for TFT screen
-#define PIN_CS					53			//connects to CS pin
-#define PIN_RST					50			//connects to RESET pin
-#define PIN_DC					48			//connects to AD pin
-//hardware SPI pins	SCK and MOSI (52 and 51 for Mega, 13 and 11 for UNO) connected to pins SCK and SDA of the LCD
+//joystick controls							//device interface pins
+#define PIN_BUTTON_UP			A5			//A
+#define PIN_BUTTON_DOWN			A3			//C
+#define PIN_BUTTON_LIGHTS		A0			//F
+#define PIN_BUTTON_SERVO_UP		A4			//B
+#define PIN_BUTTON_SERVO_DOWN	A2			//D
+#define PIN_BUTTON_SERVO_RESET	A1			//E
 
-//pin definitions for joystick
+#define PIN_JOYSTICK_X			A6			//X
+#define PIN_JOYSTICK_Y			A7			//Y
+#define PIN_JOYSTICK_BUTTON		A8			//K
 
-#define PIN_BUTTON_UP			A5	//A
-#define PIN_BUTTON_DOWN			A3	//C
-#define PIN_BUTTON_LIGHTS		A0	//F
-#define PIN_BUTTON_SERVO_UP		A4	//B
-#define PIN_BUTTON_SERVO_DOWN	A2	//D
-#define PIN_BUTTON_SERVO_RESET	A1	//E
-
-#define PIN_JOYSTICK_X			A6	//X
-#define PIN_JOYSTICK_Y			A7	//Y
-#define PIN_JOYSTICK_BUTTON		A8	//K
-
-//pins definition for LEDs
+//LEDs 
 #define PIN_LED_POWER_SUPPLY	7
 #define PIN_LED_LEAK_ALARM		6
 #define PIN_LED_TX				5
 #define PIN_LED_RX				4
 
-//pin definition for the leak alarm buzzer 
+//buzzer 
 #define PIN_BUZZER_LEAK_ALARM	3
 
-//pin definition for RS485 Serial comms
-#define PIN_RS485_MODE			2
+//comms
+#define PIN_RS485_MODE			2			 //Rx/Tx select
 
-//for LCD TFT screen manipulations
-TFT MyTFT = TFT(PIN_CS, PIN_DC, PIN_RST);	
+/*
+ * global objects, flags and other vars
+ */
 
-//commms watchdog time data
+//TFT LCD 1.8in 128x160px display 
+TFT MyTFT = TFT(PIN_SS, PIN_DC, PIN_MISO);	//(only) 3 SPI pins need to be given	
+
+//BMP280 atmospheric PT sensor
+Adafruit_BMP280 BMP;			//I2C protocol
+bool foundBmpSensor = FALSE;	//for init
+
+//comms buffers
+byte Received_Packet[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }; //Rx msg max size is 9bytes
+byte Incoming_Frame[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+byte Incoming_Byte = 0;
+
+uint32 Rx_Good = 0; //debug
+uint32 Rx_Incomplete = 0; //debug
+uint32 Rx_Rubbish = 0; //debug
+bool dispStats = TRUE; //debug
+
+//commms watchdog updates
 bool Get_Wdog_Timestamp = TRUE;
-uint32 Wdog_Timestamp = 0;		//Topside controller
+uint32 Wdog_Timestamp = 0;		//topside controller
+uint32 SendWdog_Timestamp = 0;	//to send to subsea controller
 
-uint32 SendWdog_Timestamp = 0;	//to send to Subsea controller
+//timestamps and flags for data updates
+uint32 Cycle_Timestamp = 0;		//used to compare other events against and for comms watchdog
+uint32 Runtime_Timestamp = 0;	//runtime updates 
+bool RunTime_Flag = TRUE;
+uint32 Time_Timestamp = 0;		//time updates
+bool Time_Flag = TRUE;
+uint32 Measurements_Timestamp = 0;	//sensors data updates
+bool Measurements_Flag = TRUE;
 
+/*
+*  functions
+*/
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //display current runtime
 void dispRuntime()
 {
-	//calculate full hrs and remaining mins and sePIN_CS
+	//calculate full hrs and remaining mins and sePIN_SS
 	uint32 timer = millis();				//ms total
 	timer = timer * 0.001;					//s total
 	uint16 timer_Min = timer / 60;			//full mins only
@@ -169,24 +201,22 @@ void dispDate()
 }
 
 
-Adafruit_BMP280 BMP;	//I2C protocol used
-bool foundBmpSensor = FALSE;
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //display air pressure and temperature
 void dispAirTemperatureAndPressure()
 {
-	float air_temperature = 0;
-	float air_pressure = 0;
+	float air_temperature	= 0.0;
+	float air_pressure		= 0.0;
 
 	if (foundBmpSensor)
 	{
-		air_temperature = (BMP.readTemperature() - 1.2);
-		air_pressure = BMP.readPressure();
+		air_temperature		= (BMP.readTemperature() - 1.2);
+		air_pressure		= BMP.readPressure();
 	}
 	else	//try to locate lost sensor
 	{
-		foundBmpSensor = BMP.begin();
+		foundBmpSensor		= BMP.begin();
+		Wire.setClock(400000L); //change from default 100k to 400kHz clock speed for I2C
 	}
 
 	//temperature
@@ -212,18 +242,6 @@ void eraseAirTemperatureAndPressure()
 }
 
 
-//define array for Serial message storage
-//{4 bytes for water temp, 4 bytes for water press, 1 byte for water ingress}
-byte Received_Packet[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1 };		
-byte Received_Packet_New[] = { 0x1, 0x2, 0x3, 0x4, 0x1, 0x2, 0x3, 0x4, 0x1 };
-
-//define byte to store single byte from the message
-byte Incoming_Byte = 0;
-uint32 Rx_Good = 0; //debug
-uint32 Rx_Incomplete = 0; //debug
-uint32 Rx_Rubbish = 0; //debug
-bool dispStats = TRUE; //debug
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //receive water pressure, temperature and leak level data
 void receiveSubseaTelemetryData()
@@ -239,11 +257,11 @@ void receiveSubseaTelemetryData()
 			{
 				case START_WATERTEMP_MSG_ID:
 				{
-					Serial3.readBytes((Received_Packet_New + 0), 4);
+					Serial3.readBytes((Incoming_Frame + 0), 4);
 					if (Serial3.read() == STOP_WATERTEMP_MSG_ID)
 					{
 						for (byte i = 0; i < 4; i++)
-							Received_Packet[i] = Received_Packet_New[i];
+							Received_Packet[i] = Incoming_Frame[i];
 
 						Rx_Good++; //debug
 					}
@@ -259,11 +277,11 @@ void receiveSubseaTelemetryData()
 							
 				case START_WATERPRESS_MSG_ID:
 				{
-					Serial3.readBytes((Received_Packet_New + 4), 4);
+					Serial3.readBytes((Incoming_Frame + 4), 4);
 					if (Serial3.read() == STOP_WATERPRESS_MSG_ID)
 					{
 						for (byte i = 4; i < 8; i++)
-							Received_Packet[i] = Received_Packet_New[i];
+							Received_Packet[i] = Incoming_Frame[i];
 
 						Rx_Good++; //debug
 
@@ -281,10 +299,10 @@ void receiveSubseaTelemetryData()
 
 				case START_WATERING_MSG_ID:
 				{
-					Received_Packet_New[8] = Serial3.read();
+					Incoming_Frame[8] = Serial3.read();
 					if (Serial3.read() == STOP_WATERING_MSG_ID)
 					{
-						Received_Packet[8] = Received_Packet_New[8];
+						Received_Packet[8] = Incoming_Frame[8];
 
 						//Serial3.println("Water ingress received OK"); //debug
 						//when water ingress info is received, kick the watchdog
@@ -761,27 +779,19 @@ void setup()
 	//locate BMP air/press sensor - I2C protocol
 	foundBmpSensor = BMP.begin();
 
-	//RS485
-	pinMode(PIN_RS485_MODE, OUTPUT);		//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
-	Serial3.begin(BITRATE, SERIAL_SETTINGS);		//open Serial Port for RS485 comms
+	//increase speed of I2C hardware clock from 100k (default) to 400kHz (max)
+	//needs to be called after Wire.begin() invoked by I2C sensors
+	Wire.setClock(400000L);						
 
-	Serial.begin(BITRATE); 	//debug
-	Serial.print("Bitrate: "); Serial.println(BITRATE); //debug
+	//RS485
+	pinMode(PIN_RS485_MODE, OUTPUT);			//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
+	Serial3.begin(BITRATE, SERIAL_SETTINGS);	//open Serial Port for RS485 comms
+	Serial.begin(BITRATE);						//open Serial Port for RS485 comms
+
+	//Serial3.print("Bitrate: "); Serial3.println(BITRATE); //debug
 
 }//end of setup
 
-
-//global data to define how often to retrieve and refresh data
-uint32 Cycle_Timestamp = 0;	//timestamp of each separate cycle to compare against to
-
-uint32 Runtime_Timestamp = 0;
-bool RunTime_Flag = TRUE;
-
-uint32 Time_Timestamp = 0;
-bool Time_Flag = TRUE;
-
-uint32 Measurements_Timestamp = 0;
-bool Measurements_Flag = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //main program
@@ -879,6 +889,7 @@ void loop()
 	//Serial3.println("WTF");
 
 	//beep(1, 750);
+
 	//DEBUG:
 	if (dispStats == true)
 	{
@@ -891,7 +902,11 @@ void loop()
 		dispStats = false;
 	}
 
-}//end of loop
+	//debug
+	/*while (Serial3.available())
+	{
+		Serial.println(Serial3.read());
+		
+	}*/
 
-
-
+}//loop
