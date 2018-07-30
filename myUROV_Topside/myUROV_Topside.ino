@@ -58,35 +58,66 @@
  */
 
 //TFT LCD 1.8in 128x160px display 
-TFT MyTFT = TFT(PIN_SS, PIN_DC, PIN_MISO);	//(only) 3 SPI pins need to be given	
+TFT MyTFT = TFT(PIN_SS, PIN_DC, PIN_MISO);	//3 SPI pins need to be given (only) 	
 
 //BMP280 atmospheric PT sensor
-Adafruit_BMP280 BMP;			//I2C protocol
-bool foundBmpSensor = FALSE;	//for init
+Adafruit_BMP280 BMP;				//I2C protocol
+bool foundBmpSensor = FALSE;		//for init
 
 //comms buffers
-byte Received_Packet[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 }; //Rx msg max size is 9bytes
-byte Incoming_Frame[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-byte Incoming_Byte = 0;
+byte Received_Packet[] =	{ 0, 0, 0, 0, 0, 0, 0, 0, 0 }; //Rx msg max size is 9bytes
+byte Incoming_Frame[] =		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+byte Incoming_Byte =		0;
 
-uint32 Rx_Good = 0; //debug
+uint32 Rx_Good =	0; //debug
 uint32 Rx_Incomplete = 0; //debug
 uint32 Rx_Rubbish = 0; //debug
 bool dispStats = TRUE; //debug
 
 //commms watchdog updates
-bool Get_Wdog_Timestamp = TRUE;
-uint32 Wdog_Timestamp = 0;		//topside controller
-uint32 SendWdog_Timestamp = 0;	//to send to subsea controller
+uint32 Wdog_Timestamp =		0;		//topside controller
+bool Get_Wdog_Timestamp =	TRUE;
 
-//timestamps and flags for data updates
-uint32 Cycle_Timestamp = 0;		//used to compare other events against and for comms watchdog
-uint32 Runtime_Timestamp = 0;	//runtime updates 
-bool RunTime_Flag = TRUE;
-uint32 Time_Timestamp = 0;		//time updates
-bool Time_Flag = TRUE;
+//data updates
+uint32 Cycle_Timestamp =	0;		//used to compare other events against and for comms watchdog
+uint32 Runtime_Timestamp =	0;		//runtime updates 
+bool RunTime_Flag =			TRUE;
+uint32 Time_Timestamp =		0;		//time updates
+bool Time_Flag =			TRUE;
 uint32 Measurements_Timestamp = 0;	//sensors data updates
-bool Measurements_Flag = TRUE;
+bool Measurements_Flag =	TRUE;
+
+//joystick commands (new/periodic) updates
+uint32 SendWdog_Timestamp = 0;		//to send to UROV controller
+bool Send_Flag =			TRUE;
+bool Send_Motors_Flag =		TRUE;
+bool Send_Lights_Flag =		TRUE;
+bool Send_Servo_Flag =		TRUE;
+
+//default values corresponding to joystick default position readings
+//movement
+byte Left_Right_Joystick_Motion =		LEFT_RIGHT_DEFAULT;
+byte Forward_Backward_Joystick_Motion = FRWRD_BCKWRD_DEFAULT;
+byte Up_Button_Motion =		1;
+byte Down_Button_Motion =	1;
+byte UpDown_Button_Reset =	1;
+
+byte Left_Right_Joystick_Motion_Old;
+byte Forward_Backward_Joystick_Motion_Old;
+byte UpDown_Motion_Adjust = 0;		//zero speed by default
+byte UpDown_Motion_Adjust_Old = 2;	//0 - reset, 1 - slower/dive, 2 - do not change, 3 - faster/surface
+
+//lights
+byte Lights_Toggle =		0;		//off by default; 0 - off, 1 - on
+byte Lights_Button =		1;
+byte Lights_Button_Old =	1;
+
+//servo
+byte Servo_Position_Adjust = 0;		//horizontal position by default
+byte Servo_Position_Adjust_Old = 2;	//0 - reset, 1 - lower, 2 - do not change, 3 - higher
+byte Servo_Button_Lower =	1;
+byte Servo_Button_Higher =	1;
+byte Servo_Button_Reset =	1;
 
 /*
 *  functions
@@ -97,27 +128,27 @@ bool Measurements_Flag = TRUE;
 void dispRuntime()
 {
 	//calculate full hrs and remaining mins and sePIN_SS
-	uint32 timer = millis();				//ms total
-	timer = timer * 0.001;					//s total
-	uint16 timer_Min = timer / 60;			//full mins only
-	byte timer_Hrs = timer_Min / 60;		//full hours only
-	timer = timer - timer_Min * 60;			//s only (on top of minutes)
-	timer_Min = timer_Min - timer_Hrs * 60;	//min only (on top of hours)
+	uint32 timer =	millis();				//ms total
+	timer =			timer * 0.001;			//s total
+	uint16 timerMin = timer / 60;			//full mins only
+	byte timerHrs = timerMin / 60;			//full hours only
+	timer =			timer - timerMin * 60;	//s only (on top of minutes)
+	timerMin =		timerMin - timerHrs * 60;	//min only (on top of hours)
 
 	//display runtime in the format: "hh hrs mm min ss s"
 	MyTFT.setTextSize(1);
 	MyTFT.setTextColor(ST7735_GREEN);
-	MyTFT.setCursor(50, 153);
-	if (timer_Hrs >= 0 && timer_Hrs < 10)
-		MyTFT.print('0');
-	MyTFT.print(timer_Hrs);
+	MyTFT.setCursor(RUNTIME_X + 50, RUNTIME_Y);
+	if (timerHrs >= 0 && timerHrs < 10)
+		MyTFT.print(F("0"));
+	MyTFT.print(timerHrs);
 
-	MyTFT.setCursor(71, 153);
-	if (timer_Min >= 0 && timer_Min < 10)
-		MyTFT.print('0'); 
-	MyTFT.print(timer_Min);
+	MyTFT.setCursor(RUNTIME_X + 71, RUNTIME_Y);
+	if (timerMin >= 0 && timerMin < 10)
+		MyTFT.print(F("0"));
+	MyTFT.print(timerMin);
 
-	MyTFT.setCursor(92, 153);
+	MyTFT.setCursor(RUNTIME_X + 92, RUNTIME_Y);
 	MyTFT.print(timer);
 }
 
@@ -126,9 +157,9 @@ void dispRuntime()
 //erase runtime
 void eraseRuntime()
 {
-	MyTFT.fillRect(50, 153, 12, 7, ST7735_BLACK);
-	MyTFT.fillRect(71, 153, 12, 7, ST7735_BLACK);
-	MyTFT.fillRect(92, 153, 12, 7, ST7735_BLACK);
+	MyTFT.fillRect(RUNTIME_X + 50, RUNTIME_Y, 12, 7, ST7735_BLACK);
+	MyTFT.fillRect(RUNTIME_X + 71, RUNTIME_Y, 12, 7, ST7735_BLACK);
+	MyTFT.fillRect(RUNTIME_X + 92, RUNTIME_Y, 12, 7, ST7735_BLACK);
 }
 
 
@@ -142,10 +173,10 @@ void dispTime()
 	{ 
 		//get hour
 		MyTFT.setTextSize(1);
-		MyTFT.setCursor(10, 0);
+		MyTFT.setCursor(TIME_X, TIME_Y);
 		MyTFT.setTextColor(ST7735_CYAN);
 		if (Time.Hour >= 0 && Time.Hour < 10)
-			MyTFT.print('0');
+			MyTFT.print(F("0"));
 		MyTFT.print(Time.Hour);
 
 		MyTFT.setTextColor(ST7735_WHITE);
@@ -154,7 +185,7 @@ void dispTime()
 		//get minute
 		MyTFT.setTextColor(ST7735_CYAN);
 		if (Time.Minute >= 0 && Time.Minute < 10)
-			MyTFT.print('0');
+			MyTFT.print(F("0"));
 		MyTFT.print(Time.Minute);
 	}
 }
@@ -164,7 +195,7 @@ void dispTime()
 //erase current time
 void eraseTime()
 {
-	MyTFT.fillRect(10, 0, 32, 7, ST7735_BLACK);
+	MyTFT.fillRect(TIME_X, TIME_Y, 32, 7, ST7735_BLACK);
 }
 
 
@@ -178,10 +209,10 @@ void dispDate()
 	{		
 		//display current date
 		//day
-		MyTFT.setCursor(60, 0);
+		MyTFT.setCursor(DATE_X, DATE_Y);
 		MyTFT.setTextColor(ST7735_MAGENTA);
 		if (Time.Day >= 0 && Time.Day < 10)
-			MyTFT.print('0');
+			MyTFT.print(F("0"));
 		MyTFT.print(Time.Day);
 
 		//month
@@ -189,7 +220,7 @@ void dispDate()
 		MyTFT.print(F("."));
 		MyTFT.setTextColor(ST7735_MAGENTA);
 		if (Time.Month >= 0 && Time.Month < 10)
-			MyTFT.print('0');
+			MyTFT.print(F("0"));
 		MyTFT.print(Time.Month);
 
 		//year
@@ -203,7 +234,7 @@ void dispDate()
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //display air pressure and temperature
-void dispAirTemperatureAndPressure()
+void dispAirTempPress()
 {
 	float air_temperature	= 0.0;
 	float air_pressure		= 0.0;
@@ -219,26 +250,71 @@ void dispAirTemperatureAndPressure()
 		Wire.setClock(400000L); //change from default 100k to 400kHz clock speed for I2C
 	}
 
-	//temperature
+	//air temperature
 	MyTFT.setTextSize(2);
-	MyTFT.setCursor(10, 36);
+	MyTFT.setCursor(MSRMNTS_X, AIR_TEMP_Y);
 	MyTFT.setTextColor(ST7735_WHITE);
 	MyTFT.print(air_temperature, 1);
 
-	//pressure
-	MyTFT.setCursor(10, 61);
+	//air pressure
+	MyTFT.setCursor(MSRMNTS_X, AIR_PRESS_Y);
 	MyTFT.print(air_pressure / 100.0, 1);
 }
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //erase air temperature and pressure
-void eraseAirTemperatureAndPressure()
+void eraseAirTempPress()
 {
-	//temperature	
-	MyTFT.fillRect(10, 36, 75, 14, ST7735_BLACK);
-	//pressure
-	MyTFT.fillRect(10, 61, 75, 14, ST7735_BLACK);
+	//air temperature	
+	MyTFT.fillRect(MSRMNTS_X, AIR_TEMP_Y, 73, 14, ST7735_BLACK);
+	//air pressure
+	MyTFT.fillRect(MSRMNTS_X, AIR_PRESS_Y, 73, 14, ST7735_BLACK);
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//display water temperature and pressure
+void dispWaterTempPressDpth()
+{
+	//define variables for water temperature and pressure values storage, bytes casted to float/byte
+	float water_temperature = *(float *)Received_Packet;
+	float water_pressure = *(float *)(Received_Packet + 4);
+
+	//water temperature
+	MyTFT.setTextSize(2);
+	MyTFT.setTextColor(ST7735_WHITE);
+	MyTFT.setCursor(MSRMNTS_X, WATER_TEMP_Y);
+	MyTFT.print(water_temperature, 1);			//degC
+
+	//water pressure
+	MyTFT.setCursor(MSRMNTS_X, WATER_PRESS_Y);
+	MyTFT.print(water_pressure / 100000.0, 2);	//bar
+
+	//depth
+	MyTFT.setCursor(MSRMNTS_X, DEPTH_Y);
+	MyTFT.print(water_pressure / (RHO * G), 2);	//= Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
+
+	//max depth
+	MyTFT.setTextSize(1);
+	MyTFT.setTextColor(ST7735_WHITE);
+	MyTFT.setCursor(MSRMNTS_X, MAX_DEPTH_Y);
+	MyTFT.print(water_pressure / (RHO * G), 2);	
+}
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////
+//erase water temperature and pressure
+void eraseWaterTempPressDpth()
+{
+	//water temperature	
+	MyTFT.fillRect(MSRMNTS_X, WATER_TEMP_Y, 73, 14, ST7735_BLACK);
+	//water pressure
+	MyTFT.fillRect(MSRMNTS_X, WATER_PRESS_Y, 73, 14, ST7735_BLACK);
+	//water depth
+	MyTFT.fillRect(MSRMNTS_X, DEPTH_Y, 73, 14, ST7735_BLACK);
+	//max depth
+	MyTFT.fillRect(MSRMNTS_X, MAX_DEPTH_Y, 30, 7, ST7735_BLACK);
 }
 
 
@@ -292,7 +368,6 @@ void receiveSubseaTelemetryData()
 						//beep(1, 100); Serial3.println("Corrupted packet PRESS");
 						Rx_Incomplete++; //debug
 						dispStats = TRUE; //debug
-
 					}	
 				}
 				break;
@@ -308,7 +383,6 @@ void receiveSubseaTelemetryData()
 						//when water ingress info is received, kick the watchdog
 						Get_Wdog_Timestamp = TRUE;
 						Rx_Good++; //debug
-
 					}
 
 					else
@@ -316,7 +390,6 @@ void receiveSubseaTelemetryData()
 						//beep(1, 100); Serial3.println("Corrupted packet INGRESS");
 						Rx_Incomplete++; //debug
 						dispStats = TRUE; //debug
-
 					}	//corrupted packet - ignore 
 				}
 				break;
@@ -328,53 +401,14 @@ void receiveSubseaTelemetryData()
 					//Serial3.println(Serial3.available()); 
 					Rx_Rubbish++; //debug
 					dispStats = TRUE; //debug
-
-
 				}
 				break;
 			
 		}//switch
 	}//while
 
-	delay(2);				//only to make LED light visible
+	delay(2);	//only to make LED light visible
 	digitalWrite(PIN_LED_RX, LOW);
-}
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-//display water temperature and pressure
-void dispWaterTemperaturePressureDepth()
-{
-	//define variables for water temperature and pressure values storage, bytes casted to float/byte
-	float water_temperature = *(float *)Received_Packet;
-	float water_pressure = *(float *)(Received_Packet + 4);
-
-	//temperature
-	MyTFT.setTextSize(2);
-	MyTFT.setCursor(10, 92);
-	MyTFT.setTextColor(ST7735_WHITE);
-	MyTFT.print(water_temperature, 1);					//degC
-
-	//pressure
-	MyTFT.setCursor(10, 113);
-	MyTFT.print(water_pressure / 100000.0, 2);			//bar
-
-	//depth
-	MyTFT.setCursor(10, 134);
-	MyTFT.print(water_pressure / (RHO * G), 2);			//= Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
-}														
-
-
-/////////////////////////////////////////////////////////////////////////////////////////////////
-//erase water temperature and pressure
-void eraseWaterTemperaturePressureDepth()
-{
-	//temperature	
-	MyTFT.fillRect(10, 92, 75, 14, ST7735_BLACK);
-	//pressure
-	MyTFT.fillRect(10, 113, 75, 14, ST7735_BLACK);
-	//depth
-	MyTFT.fillRect(10, 134, 75, 14, ST7735_BLACK);
 }
 
 
@@ -404,37 +438,6 @@ void setWaterLeakAlarm()
 }
 
 
-//define variables for initial values corresponding to joystick default position readings
-//movement
-byte Left_Right_Joystick_Motion = LEFT_RIGHT_DEFAULT;
-byte Forward_Backward_Joystick_Motion = FRWRD_BCKWRD_DEFAULT;
-byte Up_Button_Motion = 1;
-byte Down_Button_Motion = 1;
-byte UpDown_Button_Reset = 1;
-
-byte Left_Right_Joystick_Motion_Old;
-byte Forward_Backward_Joystick_Motion_Old;
-byte UpDown_Motion_Adjust = 0;		//zero speed by default
-byte UpDown_Motion_Adjust_Old = 2;	//0 - reset, 1 - slower/dive, 2 - do not change, 3 - faster/surface
-
-//lights
-byte Lights_Toggle = 0;				//off by default; 0 - off, 1 - on
-byte Lights_Button = 1;				
-byte Lights_Button_Old = 1;		
-
-//servo
-byte Servo_Position_Adjust = 0;		//horizontal position by default
-byte Servo_Position_Adjust_Old = 2;	//0 - reset, 1 - lower, 2 - do not change, 3 - higher
-byte Servo_Button_Lower = 1;
-byte Servo_Button_Higher = 1;
-byte Servo_Button_Reset = 1;
-
-//set flag determining when to send new (only) joystick readings and suppress receiving any data temporarily
-bool Send_Flag = TRUE;
-bool Send_Motors_Flag = TRUE;
-bool Send_Lights_Flag = TRUE;
-bool Send_Servo_Flag = TRUE;
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //read joystick command
 void getCmd()
@@ -442,18 +445,18 @@ void getCmd()
 	/* motors */
 
 	//read in the joystick position, map to 1 byte size value
-	Left_Right_Joystick_Motion = map( analogRead(PIN_JOYSTICK_X), 0, 1023, 0, 255 );
-	Forward_Backward_Joystick_Motion = map( analogRead(PIN_JOYSTICK_Y), 0, 1023, 0, 255 );
+	Left_Right_Joystick_Motion = map(analogRead(PIN_JOYSTICK_X), 0, 1023, 0, 255);
+	Forward_Backward_Joystick_Motion = map(analogRead(PIN_JOYSTICK_Y), 0, 1023, 0, 255);
 
 	//take into account fluctuations on analog signal from the joystick when it is static
 	//both when it is in its default (zero) position and when it swerved
 
 	//FWD/BWD
-	if ( Forward_Backward_Joystick_Motion >= (FRWRD_BCKWRD_DEFAULT - FLUCTUATION_ZERO ) &&
-		Forward_Backward_Joystick_Motion <= (FRWRD_BCKWRD_DEFAULT + FLUCTUATION_ZERO ) )
+	if (Forward_Backward_Joystick_Motion >= (FRWRD_BCKWRD_DEFAULT - FLUCTUATION_ZERO) &&
+		Forward_Backward_Joystick_Motion <= (FRWRD_BCKWRD_DEFAULT + FLUCTUATION_ZERO))
 		Forward_Backward_Joystick_Motion = FRWRD_BCKWRD_DEFAULT;
 
-	if ( Forward_Backward_Joystick_Motion >= Forward_Backward_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
+	if (Forward_Backward_Joystick_Motion >= Forward_Backward_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
 		Forward_Backward_Joystick_Motion <= Forward_Backward_Joystick_Motion_Old - FLUCTUATION_NONZERO )
 	{
 		Forward_Backward_Joystick_Motion_Old = Forward_Backward_Joystick_Motion;
@@ -465,8 +468,8 @@ void getCmd()
 		Left_Right_Joystick_Motion <= (LEFT_RIGHT_DEFAULT + FLUCTUATION_ZERO))
 		Left_Right_Joystick_Motion = LEFT_RIGHT_DEFAULT;
 
-	if ( Left_Right_Joystick_Motion >= Left_Right_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
-		 Left_Right_Joystick_Motion <= Left_Right_Joystick_Motion_Old - FLUCTUATION_NONZERO )
+	if (Left_Right_Joystick_Motion >= Left_Right_Joystick_Motion_Old + FLUCTUATION_NONZERO ||
+		 Left_Right_Joystick_Motion <= Left_Right_Joystick_Motion_Old - FLUCTUATION_NONZERO)
 	{
 		Left_Right_Joystick_Motion_Old = Left_Right_Joystick_Motion;
 		Send_Motors_Flag = TRUE;
@@ -696,67 +699,76 @@ void setup()
 {	
 	//display
 	MyTFT.begin();							//initialise LCD
-	MyTFT.background(0, 0, 0);				//black background
-
-	//display runtime related static text
-	MyTFT.setTextSize(1);
-	MyTFT.setTextColor(ST7735_WHITE);
-	MyTFT.setCursor(0, 153);
-	MyTFT.print(F("Runtime:"));
-	MyTFT.setCursor(63, 153);
-	MyTFT.print(F("h"));
-	MyTFT.setCursor(85, 153);
-	MyTFT.print(F("m"));
-	MyTFT.setCursor(105, 153);
-	MyTFT.print(F("s"));
+	MyTFT.background(ST7735_BLACK);			//set the background
 
 	//display date
 	dispDate();
 
-	//display 'Topside:'
-	MyTFT.setCursor(0, 24);
+	//display 'Surface:'
 	MyTFT.setTextColor(0x2e8b);
-	MyTFT.print(F("Topside:"));
+	MyTFT.setCursor(SECTIONS_X, TOPSIDE_Y);
+	MyTFT.print(F("Surface:"));
 
 	//display 'Subsea:'
-	MyTFT.setCursor(0, 80);
+	MyTFT.setCursor(SECTIONS_X, SUBSEA_Y);
 	MyTFT.setTextColor(ST7735_RED);
-	MyTFT.print(F("Subsea:"));
+	MyTFT.print(F("UROV:"));
 
-	//display 'degC' for air and water temperature values
+	//display 'degC' for air values
 	MyTFT.setTextSize(1);
-	MyTFT.setCursor(87, 34);
 	MyTFT.setTextColor(0x2e8b);
+	MyTFT.setCursor(DEG_AIR_X, DEG_AIR_Y);
 	MyTFT.print(F("o"));
 	MyTFT.setTextSize(2);
-	MyTFT.setCursor(95, 36);
+	MyTFT.setCursor(DEG_AIR_X + 8, DEG_AIR_Y);
 	MyTFT.print(F("C"));
 
+	//display 'degC' for water values
 	MyTFT.setTextSize(1);
-	MyTFT.setCursor(87, 90);
+	MyTFT.setCursor(DEG_WATER_X, DEG_WATER_Y);
 	MyTFT.print(F("o"));
 	MyTFT.setTextSize(2);
-	MyTFT.setCursor(95, 92);
+	MyTFT.setCursor(DEG_WATER_X + 8, DEG_WATER_Y);
 	MyTFT.print(F("C"));
 
 	//display 'hPa' for air pressure value
-	MyTFT.setCursor(90, 61);
+	MyTFT.setCursor(HPA_X, HPA_Y);
 	MyTFT.print(F("hPa"));
 
-	//display 'bar' and 'm' for water pressure and depth
-	MyTFT.setCursor(90, 113);
+	//display 'bar' for water pressure
+	MyTFT.setCursor(BAR_X, BAR_Y);
 	MyTFT.print(F("bar"));
-	MyTFT.setCursor(90, 134);
+
+	//display 'm' for depth
+	MyTFT.setCursor(METER_X, METER_Y);
 	MyTFT.print(F("m"));
+
+	//display 'm' for max depth
+	MyTFT.setTextSize(1);
+	MyTFT.setCursor(MAX_METER_X, MAX_METER_Y);
+	MyTFT.print(F("m"));
+
+	//display runtime related static text
+	MyTFT.setTextColor(ST7735_WHITE);
+	MyTFT.setCursor(RUNTIME_X, RUNTIME_Y);
+	MyTFT.print(F("Runtime:"));
+	MyTFT.setCursor(RUNTIME_X + 63, RUNTIME_Y);
+	MyTFT.print(F("h"));
+	MyTFT.setCursor(RUNTIME_X + 85, RUNTIME_Y);
+	MyTFT.print(F("m"));
+	MyTFT.setCursor(RUNTIME_X + 105, RUNTIME_Y);
+	MyTFT.print(F("s"));
+
+	//display 'Max:'
+	MyTFT.setTextColor(ST7735_BLUE);
+	MyTFT.setCursor(SECTIONS_X, MAX_Y);
+	MyTFT.print(F("Max:"));
 
 	//set LED pins to output
 	pinMode(PIN_LED_POWER_SUPPLY, OUTPUT);
 	pinMode(PIN_LED_LEAK_ALARM, OUTPUT);
 	pinMode(PIN_LED_TX, OUTPUT);
 	pinMode(PIN_LED_RX, OUTPUT);
-
-	//light Power Supply LED
-	digitalWrite(PIN_LED_POWER_SUPPLY, HIGH);
 
 	//set joystick pins to input
 	pinMode(PIN_JOYSTICK_BUTTON, INPUT);
@@ -788,8 +800,8 @@ void setup()
 	Serial3.begin(BITRATE, SERIAL_SETTINGS);	//open Serial Port for RS485 comms
 	Serial.begin(BITRATE);						//open Serial Port for RS485 comms
 
-	//Serial3.print("Bitrate: "); Serial3.println(BITRATE); //debug
-
+	//light Power Supply LED
+	digitalWrite(PIN_LED_POWER_SUPPLY, HIGH);
 }//end of setup
 
 
@@ -836,11 +848,11 @@ void loop()
 
 	if (Measurements_Flag)
 	{
-		eraseAirTemperatureAndPressure();
-		dispAirTemperatureAndPressure();
+		eraseAirTempPress();
+		dispAirTempPress();
 
-		eraseWaterTemperaturePressureDepth();
-		dispWaterTemperaturePressureDepth();
+		eraseWaterTempPressDpth();
+		dispWaterTempPressDpth();
 
 		setWaterLeakAlarm();
 
@@ -862,9 +874,7 @@ void loop()
 	} 
 
 	watchdog(Cycle_Timestamp);
-		
 
-		
 	//joystick stuff//////////////
 	//uint16 butup = digitalRead(PIN_BUTTON_UP);
 	//uint16 butdown = digitalRead(PIN_BUTTON_DOWN);

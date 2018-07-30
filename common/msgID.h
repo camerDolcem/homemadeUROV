@@ -1,14 +1,14 @@
 /***********************************************************************************
- Name:
-     msgID.h
- Description:
-     List of delimiters indicating the beginning of serial message
- Version:
-     01
- Created:
-	2017
- By:
-	Jakub Kurkowski
+	Name:
+		msgID.h
+	Description:
+		Definition of delimiters indicating boundaries of messages sent between controllers.
+	Version:
+		1.0
+	Created:
+		Jul 2018
+	By:
+		Jakub Kurkowski
 ***********************************************************************************/
 
 enum ListOfMsgIDs

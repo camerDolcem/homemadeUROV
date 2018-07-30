@@ -56,8 +56,31 @@ Servo MotorsLR;						//left/right (yaw)
 Servo MotorsUD;						//up down (surface/dive)
 
 //commms watchdog updates
-bool Get_Wdog_Timestamp = TRUE;
-uint32 Wdog_Timestamp = 0;
+uint32 Wdog_Timestamp =		0;
+bool Get_Wdog_Timestamp =	TRUE;
+
+//safety mechanism updates
+bool Recovering_Flag =		FALSE;
+bool Stopped_Flag =			FALSE;
+
+//deactivation of the (jittering) servo (also, saves power)
+uint32 Deactivate_Servo_Timestamp = 0;
+bool Deactivate_Flag =		FALSE;
+bool Detached_Flag =		FALSE;
+
+//data updates
+uint32 Cycle_Timestamp =	0;		//timestamp of each separate cycle to compare against to
+uint32 Measurements_Timestamp = 0;
+bool Measurements_Flag =	TRUE;
+
+//measurements (new/periodic) updates
+bool SendPacket_Flag =		TRUE;	//to send to surface controller
+uint32 Send_Timestamp =		0;
+
+//re-send commands
+bool Send_Motors_Cmd =		TRUE;
+bool Send_Lights_Cmd =		TRUE;
+bool Send_Servo_Cmd =		TRUE;
 
 /*
 *  functions
@@ -78,7 +101,7 @@ float getWaterTemperature()
 //retrieves water ingress level measurement as an analogue value and returns as mm value
 byte getWaterIngress()
 {
-	byte water_ingress = 0;											//range 0 - 40mm
+	byte water_ingress = 0;											//range: 0 - 40mm
 
 	uint16 water_ingress_read = analogRead(PIN_WATER_INGRESS);
 	delay(1); //delay due to h/w limitations of the onboard ADC 
@@ -116,7 +139,7 @@ float getWaterPressure()
 			
 			if (water_pressure_read[i] < 116) //reads up to 116 at 0.0m
 			{
-				//Serial.println(water_pressure_read[i]);//debug
+				Serial.println(water_pressure_read[i]);//debug
 
 				water_pressure_read[i] = 116;
 			}
@@ -177,7 +200,7 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], const byte waterIngre
 	Serial.write(waterIngressArg);
 	Serial.write(STOP_WATERING_MSG_ID);
 
-	delay(7);								//time needed to clock out last three bytes for bitrate >= 28800 min 6ms
+	delay(7);								//6ms is time needed to clock out last (three) bytes for bitrate >= 28800bps
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
 
@@ -185,23 +208,23 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], const byte waterIngre
 //define struct for received control messages 
 struct
 {
-	byte X_MVMT = LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
-	byte Y_MVMT = FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
-	byte Z_MVMT = 0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
+	byte X_MVMT =	LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
+	byte Y_MVMT =	FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
+	byte Z_MVMT =	0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
 											//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
-	byte LIGHTS = 0;						//0 - lights OFF, 1 - lights ON
-	byte SERVO = 2;							//0 - reset to default (horizontal position), 1 - lower the position, 
+	byte LIGHTS =	0;						//0 - lights OFF, 1 - lights ON
+	byte SERVO =	2;							//0 - reset to default (horizontal position), 1 - lower the position, 
 											//2 - do not change, 3 - raise the position
 } controls;
 
 //define struct for mapped control messages into motion commands
 struct
 {
-	uint16 X_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to turn left, 1485-2000us to turn right
-	uint16 Y_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to go bwd, 1485-2000us to go fwd
-	uint16 Z_PWM_CMD = PWM_CMD_DEFAULT;		//700-1285us to rise, 1485-2000us to dive
-	byte LIGHTS_CMD = 0;					//1 lights on, 0 lights off
-	byte SERVO_CMD = SERVO_CMD_DEFAULT;		//position of the servo in deg
+	uint16 X_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to turn left, 1485-2000us to turn right
+	uint16 Y_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to go bwd, 1485-2000us to go fwd
+	uint16 Z_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to rise, 1485-2000us to dive
+	byte LIGHTS_CMD =	0;					//1 lights on, 0 lights off
+	byte SERVO_CMD =	SERVO_CMD_DEFAULT;	//position of the servo in deg
 } commands;
 
 //define byte to store single byte from the message
@@ -310,10 +333,6 @@ void receiveTopsideJoystickData()
 	}//while
 }
 
-
-bool Send_Motors_Cmd = TRUE;
-bool Send_Lights_Cmd = TRUE;
-bool Send_Servo_Cmd = TRUE;
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //interprete and update all values needed to be sent to motors, lights and camera servo
@@ -430,23 +449,6 @@ void processControls()
 		Send_Servo_Cmd = FALSE;
 	}
 }
-
-//global data for deactivation of the (jittering) servo (holds position)
-uint32 Deactivate_Servo_Timestamp = 0;
-bool Deactivate_Flag = FALSE;
-bool Detached_Flag = FALSE;
-
-bool Recovering_Flag = FALSE;
-bool Stopped_Flag = FALSE;
-
-//global data defining how often to retrieve and send data
-uint32 Cycle_Timestamp = 0;	//timestamp of each separate cycle to compare against to
-
-uint32 Measurements_Timestamp = 0;
-bool Measurements_Flag = TRUE;
-
-uint32 Send_Timestamp = 0;
-bool SendPacket_Flag = TRUE;
 
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
