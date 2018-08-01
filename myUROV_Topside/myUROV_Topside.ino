@@ -6,7 +6,7 @@
 	Version:
 		1.0
 	Created:
-		Jul 2018
+		Aug 2018
 	By:
 		Jakub Kurkowski
 ***********************************************************************************/
@@ -21,13 +21,6 @@
 /*
  * interface connection defs
  */
-
-//LCD										//device interface pins (LCD)
-#define PIN_SS					53			//CS (Chip (aka Slave) Select)
-#define PIN_MISO				50			//RESET
-#define PIN_DC					48			//A0 (Data/Command select)
-//hardware pin SCK (Serial Clock) 			//SCK (SPI Clock input)	
-//hardware pin MOSI (Master Out Slave In)  	//SDA (SPI Data input)
 
 //joystick controls							//device interface pins
 #define PIN_BUTTON_UP			A5			//A
@@ -50,8 +43,15 @@
 //buzzer 
 #define PIN_BUZZER_LEAK_ALARM	3
 
-//comms
+//board-to-board comms
 #define PIN_RS485_MODE			2			 //Rx/Tx select
+
+//LCD										//device interface pins (LCD)
+#define PIN_SS					53			//CS (Chip (aka Slave) Select)
+#define PIN_MISO				50			//RESET
+#define PIN_DC					48			//A0 (Data/Command select)
+//hardware pin SCK (Serial Clock) 			//SCK (SPI Clock input)	
+//hardware pin MOSI (Master Out Slave In)  	//SDA (SPI Data input)
 
 /*
  * global objects, flags and other vars
@@ -94,6 +94,9 @@ bool Send_Motors_Flag =		TRUE;
 bool Send_Lights_Flag =		TRUE;
 bool Send_Servo_Flag =		TRUE;
 
+//to indicate that lost comms have already been reestablished
+bool Beep_Flag = FALSE;
+
 //default values corresponding to joystick default position readings
 //movement
 byte Left_Right_Joystick_Motion =		LEFT_RIGHT_DEFAULT;
@@ -128,28 +131,41 @@ byte Servo_Button_Reset =	1;
 void dispRuntime()
 {
 	//calculate full hrs and remaining mins and sePIN_SS
-	uint32 timer =	millis();				//ms total
-	timer =			timer * 0.001;			//s total
-	uint16 timerMin = timer / 60;			//full mins only
-	byte timerHrs = timerMin / 60;			//full hours only
-	timer =			timer - timerMin * 60;	//s only (on top of minutes)
-	timerMin =		timerMin - timerHrs * 60;	//min only (on top of hours)
+	uint32 msecs =	millis();			//ms total
+	uint32 secs =	msecs * 0.001;		//s total
+	uint16 mins =	secs / 60;			//full mins only
+	byte hrs =		mins / 60;			//full hours only
+	secs =			secs - mins * 60;	//s only (on top of minutes)
+	mins =			mins - hrs * 60;	//min only (on top of hours)
 
-	//display runtime in the format: "hh hrs mm min ss s"
+	//display runtime in the format: "[hh:][mm:]ss"
 	MyTFT.setTextSize(1);
-	MyTFT.setTextColor(ST7735_GREEN);
-	MyTFT.setCursor(RUNTIME_X + 50, RUNTIME_Y);
-	if (timerHrs >= 0 && timerHrs < 10)
-		MyTFT.print(F("0"));
-	MyTFT.print(timerHrs);
-
-	MyTFT.setCursor(RUNTIME_X + 71, RUNTIME_Y);
-	if (timerMin >= 0 && timerMin < 10)
-		MyTFT.print(F("0"));
-	MyTFT.print(timerMin);
-
-	MyTFT.setCursor(RUNTIME_X + 92, RUNTIME_Y);
-	MyTFT.print(timer);
+	MyTFT.setTextColor(ST7735_GRAY);
+	MyTFT.setCursor(RUNTIME_VAL_X, RUNTIME_VAL_Y);
+	
+	if (hrs == 0)		//if hrs are 0
+	{
+		if (mins != 0)	//but mins are not
+		{
+			MyTFT.print(mins);
+			MyTFT.print(F(":"));
+		}
+		if (secs < 10)	//add 0 in front
+			MyTFT.print(F("0"));
+		MyTFT.print(secs);
+	}
+	else				//if hrs > 0
+	{
+		MyTFT.print(hrs);
+		MyTFT.print(F(":"));
+		if (mins < 10)	//add 0 in front
+			MyTFT.print(F("0"));
+		MyTFT.print(mins);
+		MyTFT.print(F(":"));
+		if (secs < 10)	//add 0 in front
+			MyTFT.print(F("0"));
+		MyTFT.print(secs);
+	}
 }
 
 
@@ -157,9 +173,8 @@ void dispRuntime()
 //erase runtime
 void eraseRuntime()
 {
-	MyTFT.fillRect(RUNTIME_X + 50, RUNTIME_Y, 12, 7, ST7735_BLACK);
-	MyTFT.fillRect(RUNTIME_X + 71, RUNTIME_Y, 12, 7, ST7735_BLACK);
-	MyTFT.fillRect(RUNTIME_X + 92, RUNTIME_Y, 12, 7, ST7735_BLACK);
+
+	MyTFT.fillRect(RUNTIME_VAL_X, RUNTIME_VAL_Y, 60, 7, ST7735_BLACK);
 }
 
 
@@ -173,7 +188,7 @@ void dispTime()
 	{ 
 		//get hour
 		MyTFT.setTextSize(1);
-		MyTFT.setCursor(TIME_X, TIME_Y);
+		MyTFT.setCursor(TIME_VAL_X, TIME_VAL_Y);
 		MyTFT.setTextColor(ST7735_CYAN);
 		if (Time.Hour >= 0 && Time.Hour < 10)
 			MyTFT.print(F("0"));
@@ -195,7 +210,7 @@ void dispTime()
 //erase current time
 void eraseTime()
 {
-	MyTFT.fillRect(TIME_X, TIME_Y, 32, 7, ST7735_BLACK);
+	MyTFT.fillRect(TIME_VAL_X, TIME_VAL_Y, 32, 7, ST7735_BLACK);
 }
 
 
@@ -209,7 +224,7 @@ void dispDate()
 	{		
 		//display current date
 		//day
-		MyTFT.setCursor(DATE_X, DATE_Y);
+		MyTFT.setCursor(DATE_VAL_X, DATE_VAL_Y);
 		MyTFT.setTextColor(ST7735_MAGENTA);
 		if (Time.Day >= 0 && Time.Day < 10)
 			MyTFT.print(F("0"));
@@ -241,7 +256,7 @@ void dispAirTempPress()
 
 	if (foundBmpSensor)
 	{
-		air_temperature		= (BMP.readTemperature() - 1.2);
+		air_temperature		= BMP.readTemperature() - 1.2;
 		air_pressure		= BMP.readPressure();
 	}
 	else	//try to locate lost sensor
@@ -252,12 +267,12 @@ void dispAirTempPress()
 
 	//air temperature
 	MyTFT.setTextSize(2);
-	MyTFT.setCursor(MSRMNTS_X, AIR_TEMP_Y);
+	MyTFT.setCursor(AIRTEMP_VAL_X, AIRTEMP_VAL_Y);
 	MyTFT.setTextColor(ST7735_WHITE);
 	MyTFT.print(air_temperature, 1);
 
 	//air pressure
-	MyTFT.setCursor(MSRMNTS_X, AIR_PRESS_Y);
+	MyTFT.setCursor(AIRPRESS_VAL_X, AIRPRESS_VAL_Y);
 	MyTFT.print(air_pressure / 100.0, 1);
 }
 
@@ -267,9 +282,9 @@ void dispAirTempPress()
 void eraseAirTempPress()
 {
 	//air temperature	
-	MyTFT.fillRect(MSRMNTS_X, AIR_TEMP_Y, 73, 14, ST7735_BLACK);
+	MyTFT.fillRect(AIRTEMP_VAL_X, AIRTEMP_VAL_Y, 73, 14, ST7735_BLACK);
 	//air pressure
-	MyTFT.fillRect(MSRMNTS_X, AIR_PRESS_Y, 73, 14, ST7735_BLACK);
+	MyTFT.fillRect(AIRPRESS_VAL_X, AIRPRESS_VAL_Y, 73, 14, ST7735_BLACK);
 }
 
 
@@ -278,28 +293,51 @@ void eraseAirTempPress()
 void dispWaterTempPressDpth()
 {
 	//define variables for water temperature and pressure values storage, bytes casted to float/byte
-	float water_temperature = *(float *)Received_Packet;
-	float water_pressure = *(float *)(Received_Packet + 4);
+	float waterTemperature =	*(float *)(Received_Packet + 0);
+	float waterPressurePa =		*(float *)(Received_Packet + 4);
+	float waterPressureBar =	waterPressurePa / 100000.0;		//Pa to bar
+	float waterDepth =			waterPressurePa / (RHO * G);		//Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
+	
+	float tempMaxWaterDepth =	0.0;
+	static float maxWaterDepth = 0.0;
+	static float lastVals[3] =	{0.0, 0.0, 0.0};
+	static byte index =			0;
 
-	//water temperature
+	//disp water temperature
 	MyTFT.setTextSize(2);
 	MyTFT.setTextColor(ST7735_WHITE);
-	MyTFT.setCursor(MSRMNTS_X, WATER_TEMP_Y);
-	MyTFT.print(water_temperature, 1);			//degC
+	MyTFT.setCursor(WATERTEMP_VAL_X, WATERTEMP_VAL_Y);
+	MyTFT.print(waterTemperature, 1);	//degC
 
-	//water pressure
-	MyTFT.setCursor(MSRMNTS_X, WATER_PRESS_Y);
-	MyTFT.print(water_pressure / 100000.0, 2);	//bar
+	//disp water pressure
+	MyTFT.setCursor(WATERPRESS_VAL_X, WATERPRESS_VAL_Y);
+	MyTFT.print(waterPressureBar, 2);	//bar
 
-	//depth
-	MyTFT.setCursor(MSRMNTS_X, DEPTH_Y);
-	MyTFT.print(water_pressure / (RHO * G), 2);	//= Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
+	//disp depth
+	MyTFT.setCursor(DEPTH_VAL_X, DEPTH_VAL_Y);
+	MyTFT.print(waterDepth, 2);			//m
 
-	//max depth
+	//disp store last 3 measured depths to determine max but ignore spikes
+	lastVals[index] =	waterDepth;
+	tempMaxWaterDepth = min(lastVals[0], lastVals[1]);
+	tempMaxWaterDepth = min(tempMaxWaterDepth, lastVals[2]);	//that is the 'min' max depth from last 3 readings
+
+	maxWaterDepth =		max(tempMaxWaterDepth, maxWaterDepth);		//update actual max recorded depth
+
+	if (index < 2)
+	{
+		index++;
+	}
+	else
+	{
+		index = 0;
+	}
+
+	//disp max depth
 	MyTFT.setTextSize(1);
-	MyTFT.setTextColor(ST7735_WHITE);
-	MyTFT.setCursor(MSRMNTS_X, MAX_DEPTH_Y);
-	MyTFT.print(water_pressure / (RHO * G), 2);	
+	MyTFT.setTextColor(ST7735_GRAY);
+	MyTFT.setCursor(MAXDEPTH_VAL_X, MAXDEPTH_VAL_Y);
+	MyTFT.print(maxWaterDepth, 2);
 }
 
 
@@ -308,13 +346,13 @@ void dispWaterTempPressDpth()
 void eraseWaterTempPressDpth()
 {
 	//water temperature	
-	MyTFT.fillRect(MSRMNTS_X, WATER_TEMP_Y, 73, 14, ST7735_BLACK);
+	MyTFT.fillRect(WATERTEMP_VAL_X, WATERTEMP_VAL_Y, 73, 14, ST7735_BLACK);
 	//water pressure
-	MyTFT.fillRect(MSRMNTS_X, WATER_PRESS_Y, 73, 14, ST7735_BLACK);
+	MyTFT.fillRect(WATERPRESS_VAL_X, WATERPRESS_VAL_Y, 73, 14, ST7735_BLACK);
 	//water depth
-	MyTFT.fillRect(MSRMNTS_X, DEPTH_Y, 73, 14, ST7735_BLACK);
+	MyTFT.fillRect(DEPTH_VAL_X, DEPTH_VAL_Y, 73, 14, ST7735_BLACK);
 	//max depth
-	MyTFT.fillRect(MSRMNTS_X, MAX_DEPTH_Y, 30, 7, ST7735_BLACK);
+	MyTFT.fillRect(MAXDEPTH_VAL_X, MAXDEPTH_VAL_Y, 29, 7, ST7735_BLACK);
 }
 
 
@@ -333,7 +371,7 @@ void receiveSubseaTelemetryData()
 			{
 				case START_WATERTEMP_MSG_ID:
 				{
-					Serial3.readBytes((Incoming_Frame + 0), 4);
+					Serial3.readBytes((char *)(Incoming_Frame + 0), 4); //cast to make compiler stop to complain
 					if (Serial3.read() == STOP_WATERTEMP_MSG_ID)
 					{
 						for (byte i = 0; i < 4; i++)
@@ -353,7 +391,7 @@ void receiveSubseaTelemetryData()
 							
 				case START_WATERPRESS_MSG_ID:
 				{
-					Serial3.readBytes((Incoming_Frame + 4), 4);
+					Serial3.readBytes((char *)(Incoming_Frame + 4), 4);
 					if (Serial3.read() == STOP_WATERPRESS_MSG_ID)
 					{
 						for (byte i = 4; i < 8; i++)
@@ -379,7 +417,7 @@ void receiveSubseaTelemetryData()
 					{
 						Received_Packet[8] = Incoming_Frame[8];
 
-						//Serial3.println("Water ingress received OK"); //debug
+						//Serial.println("Water ingress received OK"); //debug
 						//when water ingress info is received, kick the watchdog
 						Get_Wdog_Timestamp = TRUE;
 						Rx_Good++; //debug
@@ -414,26 +452,45 @@ void receiveSubseaTelemetryData()
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //check water ingress level and set alarm
-void setWaterLeakAlarm()
+void checkWaterLeak()
 {	
 	byte Water_Ingress_Alarm = Received_Packet[8];
+	static bool displayedAlarm = FALSE;
 
-	if (Water_Ingress_Alarm >= 1 & Water_Ingress_Alarm < 3)	//that indicates humidity in the enclosure most likely
+	if (Water_Ingress_Alarm > 0 & Water_Ingress_Alarm < 3)	//that indicates humidity in the enclosure most likely
 	{
+		//lit the alarm LED but do not buzz
 		digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
 		analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
 	}
 
 	else if (Water_Ingress_Alarm >= 3)						//that indicates probable leak
 	{
+		//lit the alarm LED and make noise
 		digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
 		analogWrite(PIN_BUZZER_LEAK_ALARM, 200);
+
+		//display "LEAK!!!" alarm
+		if (displayedAlarm == FALSE)
+		{
+			MyTFT.setTextSize(1);
+			MyTFT.setTextColor(ST7735_BLUE);
+			MyTFT.setCursor(ALARM_TXT_X, ALARM_TXT_Y);
+			MyTFT.print(F("***LEAK!***"));
+			displayedAlarm = TRUE;
+		}
 	}
 
 	else
 	{
 		digitalWrite(PIN_LED_LEAK_ALARM, LOW);
 		analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+	}
+
+	if (Water_Ingress_Alarm < 3 && displayedAlarm == TRUE)	//erase alarm txt
+	{
+		MyTFT.fillRect(ALARM_TXT_X, ALARM_TXT_Y, 65, 7, ST7735_BLACK);
+		displayedAlarm = FALSE;
 	}
 }
 
@@ -661,9 +718,6 @@ void beep(byte tuple, uint16 beepspan)
 }
 
 
-//flag to indicate that lost comms have already been communicated
-bool Beep_Flag = FALSE;
-
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //checks when the last comms took place
 void watchdog(const uint32 timestamp)
@@ -705,64 +759,65 @@ void setup()
 	dispDate();
 
 	//display 'Surface:'
+	MyTFT.setTextSize(1);
 	MyTFT.setTextColor(0x2e8b);
-	MyTFT.setCursor(SECTIONS_X, TOPSIDE_Y);
+	MyTFT.setCursor(TOPSIDE_TXT_X, TOPSIDE_TXT_Y);
 	MyTFT.print(F("Surface:"));
 
 	//display 'Subsea:'
-	MyTFT.setCursor(SECTIONS_X, SUBSEA_Y);
-	MyTFT.setTextColor(ST7735_RED);
+	MyTFT.setCursor(SUBSEA_TXT_X, SUBSEA_TXT_Y);
+	MyTFT.setTextColor(ST7735_ORANGE);
 	MyTFT.print(F("UROV:"));
 
-	//display 'degC' for air values
-	MyTFT.setTextSize(1);
+	//display 'degC' for air temp value
 	MyTFT.setTextColor(0x2e8b);
-	MyTFT.setCursor(DEG_AIR_X, DEG_AIR_Y);
+	MyTFT.setCursor(AIRTEMP_UN_X, AIRTEMP_UN_Y);
 	MyTFT.print(F("o"));
 	MyTFT.setTextSize(2);
-	MyTFT.setCursor(DEG_AIR_X + 8, DEG_AIR_Y);
-	MyTFT.print(F("C"));
-
-	//display 'degC' for water values
-	MyTFT.setTextSize(1);
-	MyTFT.setCursor(DEG_WATER_X, DEG_WATER_Y);
-	MyTFT.print(F("o"));
-	MyTFT.setTextSize(2);
-	MyTFT.setCursor(DEG_WATER_X + 8, DEG_WATER_Y);
+	MyTFT.setCursor(AIRTEMP_UN_X + 8, AIRTEMP_UN_Y);
 	MyTFT.print(F("C"));
 
 	//display 'hPa' for air pressure value
-	MyTFT.setCursor(HPA_X, HPA_Y);
+	MyTFT.setCursor(AIRPRESS_UN_X, AIRPRESS_UN_Y);
 	MyTFT.print(F("hPa"));
 
-	//display 'bar' for water pressure
-	MyTFT.setCursor(BAR_X, BAR_Y);
+	//display 'degC' for water temp
+	MyTFT.setTextSize(1);
+	MyTFT.setCursor(WATERTEMP_UN_X, WATERTEMP_UN_Y);
+	MyTFT.print(F("o"));
+	MyTFT.setTextSize(2);
+	MyTFT.setCursor(WATERTEMP_UN_X + 8, WATERTEMP_UN_Y);
+	MyTFT.print(F("C"));
+
+	//display 'bar' for water pressure value
+	MyTFT.setCursor(WATERPRESS_UN_X, WATERPRESS_UN_Y);
 	MyTFT.print(F("bar"));
 
 	//display 'm' for depth
-	MyTFT.setCursor(METER_X, METER_Y);
+	MyTFT.setCursor(DEPTH_UN_X, DEPTH_UN_Y);
 	MyTFT.print(F("m"));
 
 	//display 'm' for max depth
 	MyTFT.setTextSize(1);
-	MyTFT.setCursor(MAX_METER_X, MAX_METER_Y);
+	MyTFT.setCursor(MAXDEPTH_UN_X, MAXDEPTH_UN_Y);
 	MyTFT.print(F("m"));
 
 	//display runtime related static text
-	MyTFT.setTextColor(ST7735_WHITE);
-	MyTFT.setCursor(RUNTIME_X, RUNTIME_Y);
-	MyTFT.print(F("Runtime:"));
-	MyTFT.setCursor(RUNTIME_X + 63, RUNTIME_Y);
+	MyTFT.setTextColor(ST7735_AQUA);
+	MyTFT.setCursor(RUNTIME_TXT_X, RUNTIME_TXT_Y);
+	MyTFT.print(F("Run-time:"));
+	/*MyTFT.setTextColor(0x2e8b);
+	MyTFT.setCursor(RUNTIME_H_X, RUNTIME_Y);
 	MyTFT.print(F("h"));
-	MyTFT.setCursor(RUNTIME_X + 85, RUNTIME_Y);
+	MyTFT.setCursor(RUNTIME_M_X, RUNTIME_Y);
 	MyTFT.print(F("m"));
-	MyTFT.setCursor(RUNTIME_X + 105, RUNTIME_Y);
-	MyTFT.print(F("s"));
+	MyTFT.setCursor(RUNTIME_S_X, RUNTIME_Y);
+	MyTFT.print(F("s"));*/
 
 	//display 'Max:'
 	MyTFT.setTextColor(ST7735_BLUE);
-	MyTFT.setCursor(SECTIONS_X, MAX_Y);
-	MyTFT.print(F("Max:"));
+	MyTFT.setCursor(MAXDEPTH_TXT_X, MAXDEPTH_TXT_Y);
+	MyTFT.print(F("Max dpth:"));
 
 	//set LED pins to output
 	pinMode(PIN_LED_POWER_SUPPLY, OUTPUT);
@@ -854,7 +909,7 @@ void loop()
 		eraseWaterTempPressDpth();
 		dispWaterTempPressDpth();
 
-		setWaterLeakAlarm();
+		checkWaterLeak();
 
 		Measurements_Timestamp = millis();
 		Measurements_Flag = FALSE;

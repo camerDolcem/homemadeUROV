@@ -6,7 +6,7 @@
 	Version:
 		1.0
 	Created:
-		Jul 2018
+		Aug 2018
 	By:
 		Jakub Kurkowski
 ***********************************************************************************/
@@ -37,8 +37,8 @@
 #define PIN_MOTORS_UD		7		//up/down (surface/dive)
 
 //comms
-#define PIN_ONE_WIRE_BUS	10		//1-Wire bus		
-#define PIN_RS485_MODE		11		//Rx/Tx select
+#define PIN_RS485_MODE		12		//Rx/Tx select
+#define PIN_ONE_WIRE_BUS	11		//1-Wire bus	
 
 /*
 * global objects, flags and other vars
@@ -81,6 +81,55 @@ uint32 Send_Timestamp =		0;
 bool Send_Motors_Cmd =		TRUE;
 bool Send_Lights_Cmd =		TRUE;
 bool Send_Servo_Cmd =		TRUE;
+
+//define byte to store single byte from the message
+byte Incoming_Byte = 0;
+
+//define the flags for sending the commands and for new data 
+bool SendCmd_Flag = FALSE;
+bool NewData_Flag;							//if there is new incoming data, do not attempt to send packet to Topside
+
+//define packet for water temperature value storage and type substitution
+union WaterTemperatureImplicitCast
+{
+	float As_Float;
+	byte As_Bytes[4];
+} WaterTemperaturePacket;
+
+
+//define packet for water pressure value storage and type substitution
+union WaterPressureImplicitCast
+{
+	float As_Float;
+	byte As_Bytes[4];
+} WaterPressurePacket;
+
+//define variable for water ingress level value storage
+byte Water_Ingress_Storage;
+
+const byte Float_Size_In_Bytes = 4;			//size of byte array to store float, constant value
+
+//define struct for received control messages 
+struct
+{
+	byte X_MVMT = LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
+	byte Y_MVMT = FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
+	byte Z_MVMT = 0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
+	//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
+	byte LIGHTS = 0;						//0 - lights OFF, 1 - lights ON
+	byte SERVO = 2;							//0 - reset to default (horizontal position), 1 - lower the position, 
+	//2 - do not change, 3 - raise the position
+} controls;
+
+//define struct for mapped control messages into motion commands
+struct
+{
+	uint16 X_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to turn left, 1485-2000us to turn right
+	uint16 Y_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to go bwd, 1485-2000us to go fwd
+	uint16 Z_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to rise, 1485-2000us to dive
+	byte LIGHTS_CMD = 0;					//1 lights on, 0 lights off
+	byte SERVO_CMD = SERVO_CMD_DEFAULT;	//position of the servo in deg
+} commands;
 
 /*
 *  functions
@@ -126,54 +175,52 @@ byte getWaterIngress()
 //retrieves water pressure measurement as an analogue value and returns as Pa value
 float getWaterPressure()
 {
-	static const byte samples = 10;
-	uint16 water_pressure_read[samples];
-	float water_pressure = 0.0;
+	const byte samples =	30;
+	uint16 waterPressureAnaRead[samples];
+	float waterPressureAnaVal =	0.0;
+	float waterPressurePa =		0.0;
 
 	//averaging over number of samples
 	for (byte i = 0; i < samples; i++)										
 		{
-			water_pressure_read[i] = analogRead(PIN_WATER_PRESSURE);
+			waterPressureAnaRead[i] = analogRead(PIN_WATER_PRESSURE);
 			delay(1); //delay due to h/w limitations of the onboard ADC 
-			//Serial.println(water_pressure_read[i]); //debug
-			
-			if (water_pressure_read[i] < 116) //reads up to 116 at 0.0m
-			{
-				Serial.println(water_pressure_read[i]);//debug
+			Serial.println(waterPressureAnaRead[i]); //debug
 
-				water_pressure_read[i] = 116;
+			if (waterPressureAnaRead[i] < 116) //reads up to 116 at 0.0m, see comment below
+			{
+				waterPressureAnaRead[i] = 116;
 			}
 
-			water_pressure += water_pressure_read[i];
+			waterPressureAnaVal += waterPressureAnaRead[i];
 		}
+
+	//make avg
+	waterPressureAnaVal = waterPressureAnaVal / samples;
+	Serial.print("waterPressureAnaVal: "); Serial.println(waterPressureAnaVal, 2); //debug
+
+	/*
+	 *	0.5 - 4.5V - sensor output value corresponding to:
+	 *	0   - 1.2MPa which corresponds to (in Arduino):
+	 *	103 - 922 counts returned by ADC. That yields:
+	 *	819 counts to be spread between 0 and 1.2MPa
+	 *	BUTT! Both sensor and Arduino ADC are inaccurate due to various reasons e.g. interferences in power supply.
+	 *	Sensor returns 0.52V at 0m (atmosphere, 1009hPa) and that is translated to anything between 106 and 116 counts.
+	 *	It is assumed that the sensor is perhaps calculating against lower than above ambient pressure (sealed type).
+	 *	1.2MPa / 819 counts = 1465.2014 Pa/count OR ~~~ 0.147m (14.7cm) / count
+	 *	All the above approximations make this measurement quite inaccurate overall but should provide
+	 *	a good idea on an actual pressure/depth. 
+	 */
+
+	//now see how many counts 'beyond' 0 are we and turn it into Pascals
+	waterPressurePa = (waterPressureAnaVal - 116) * 1465.2014;
+	//waterPressurePa = 1490.68323 * (waterPressurePa / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
 	
-	water_pressure = 1490.68323 * (water_pressure / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
+	Serial.print("water pressure bar: "); Serial.println(waterPressurePa / 100000.0, 4);//debug
 	
-	//Serial.print("water pressure result: "); Serial.println(water_pressure / 100000.0, 2);//debug
-	
-	return water_pressure;													//in Pa
+	return waterPressurePa;		//in Pa
 }
 
-
-//define packet for water temperature value storage and type substitution
-union WaterTemperatureImplicitCast
-{
-	float As_Float;
-	byte As_Bytes[4];
-} WaterTemperaturePacket;
-
-
-//define packet for water pressure value storage and type substitution
-union WaterPressureImplicitCast
-{
-	float As_Float;
-	byte As_Bytes[4];
-} WaterPressurePacket;
-
-//define variable for water ingress level value storage
-byte Water_Ingress_Storage;
-
-const byte Float_Size_In_Bytes = 4;			//size of byte array to store float, constant value
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //send measurements to Topside
@@ -204,35 +251,6 @@ void sendPacket(byte waterTempArg[], byte waterPressArg[], const byte waterIngre
 	digitalWrite(PIN_RS485_MODE, LOW);		//DE=RE=low transmit disabled
 }
 
-
-//define struct for received control messages 
-struct
-{
-	byte X_MVMT =	LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
-	byte Y_MVMT =	FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
-	byte Z_MVMT =	0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
-											//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
-	byte LIGHTS =	0;						//0 - lights OFF, 1 - lights ON
-	byte SERVO =	2;							//0 - reset to default (horizontal position), 1 - lower the position, 
-											//2 - do not change, 3 - raise the position
-} controls;
-
-//define struct for mapped control messages into motion commands
-struct
-{
-	uint16 X_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to turn left, 1485-2000us to turn right
-	uint16 Y_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to go bwd, 1485-2000us to go fwd
-	uint16 Z_PWM_CMD =	PWM_CMD_DEFAULT;	//700-1285us to rise, 1485-2000us to dive
-	byte LIGHTS_CMD =	0;					//1 lights on, 0 lights off
-	byte SERVO_CMD =	SERVO_CMD_DEFAULT;	//position of the servo in deg
-} commands;
-
-//define byte to store single byte from the message
-byte Incoming_Byte = 0;
-
-//define the flags for sending the commands and for new data 
-bool SendCmd_Flag = FALSE;
-bool NewData_Flag;							//if there is new incoming data, do not attempt to send packet to Topside
 
 /////////////////////////////////////////////////////////////////////////////////////////////////
 //receive left/right, fwd/bwd,  up and down info

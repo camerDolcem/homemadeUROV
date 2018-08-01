@@ -6,7 +6,7 @@
 	Version:
 		1.0
 	Created:
-		Jul 2018
+		Aug 2018
 	By:
 		Jakub Kurkowski
 ***********************************************************************************/
@@ -47,47 +47,77 @@ typedef unsigned long			uint32;
 //joystick default position mapped readings
 #define FRWRD_BCKWRD_DEFAULT 	124
 #define LEFT_RIGHT_DEFAULT 		131
-#define FLUCTUATION_ZERO	 	10
+#define FLUCTUATION_ZERO	 	7
 #define FLUCTUATION_NONZERO		2
 
 //default motors and servo commands
 #define PWM_CMD_DEFAULT			1385	//motors stopped (ESC middle range)
 #define SERVO_CMD_DEFAULT		80		//deg
 
-//cursor positions on the display			
-#define SECTIONS_X				0				//the above two			
-#define TOPSIDE_Y				10				//e.g. 'surface:'		
-#define SUBSEA_Y				TOPSIDE_Y + 52	//e.g. 'UROV:'
-#define MAX_Y					TOPSIDE_Y + 122	//'Max:'
+//cursor positions on the display	
+//strings
+#define TITLE_TXT_X				0				//main titles x position
 
-#define MSRMNTS_X				12				//air and water measurements
-#define AIR_TEMP_Y				TOPSIDE_Y + 12 		
-#define AIR_PRESS_Y				AIR_TEMP_Y + 21	
+#define TOPSIDE_TXT_X			TITLE_TXT_X		//e.g. 'surface:'		
+#define TOPSIDE_TXT_Y			14	
 
-#define WATER_TEMP_Y			SUBSEA_Y + 12
-#define WATER_PRESS_Y			WATER_TEMP_Y + 21
-#define DEPTH_Y					WATER_PRESS_Y + 21
+#define SUBSEA_TXT_X			TITLE_TXT_X		//e.g. 'UROV:'
+#define SUBSEA_TXT_Y			TOPSIDE_TXT_Y + 52	
 
-#define MAX_DEPTH_Y				MAX_Y + 10
+#define MAXDEPTH_TXT_X			TITLE_TXT_X		//e.g. 'Max depth:'
+#define MAXDEPTH_TXT_Y			TOPSIDE_TXT_Y + 126
 
-#define TIME_X					12
-#define TIME_Y					0
+#define RUNTIME_TXT_X			TITLE_TXT_X		//e.g. 'Runtime:'
+#define RUNTIME_TXT_Y			153	
 
-#define DATE_X					TIME_X + 46
-#define DATE_Y					TIME_Y
+#define ALARM_TXT_X				TITLE_TXT_X + 55//leak alarm text
+#define ALARM_TXT_Y				TOPSIDE_TXT_Y
 
-#define RUNTIME_X				12				//e.g. 'Runtime:'
-#define RUNTIME_Y				153				
+//numbers
+#define MSRMNT_VAL_X			12				//air and water measurements
 
-#define DEG_AIR_X				MSRMNTS_X + 74	//'o' for air temp		
-#define DEG_AIR_Y				AIR_TEMP_Y - 2
-#define DEG_WATER_X				DEG_AIR_X		//'o' for water temp
-#define DEG_WATER_Y				WATER_TEMP_Y - 2
-#define HPA_X					DEG_AIR_X		//'hPa'
-#define HPA_Y					AIR_PRESS_Y
-#define	BAR_X					DEG_AIR_X		//'bar'
-#define BAR_Y					WATER_PRESS_Y
-#define	METER_X					DEG_AIR_X		//'m'
-#define	METER_Y					DEPTH_Y
-#define	MAX_METER_X				52				//'m'
-#define	MAX_METER_Y				MAX_DEPTH_Y
+#define AIRTEMP_VAL_X			MSRMNT_VAL_X
+#define AIRTEMP_VAL_Y			TOPSIDE_TXT_Y + 12 	
+
+#define AIRPRESS_VAL_X			MSRMNT_VAL_X
+#define AIRPRESS_VAL_Y			AIRTEMP_VAL_Y + 21	
+
+#define WATERTEMP_VAL_X			MSRMNT_VAL_X
+#define WATERTEMP_VAL_Y			SUBSEA_TXT_Y + 12
+
+#define WATERPRESS_VAL_X		MSRMNT_VAL_X
+#define WATERPRESS_VAL_Y		WATERTEMP_VAL_Y + 21
+
+#define DEPTH_VAL_X				MSRMNT_VAL_X
+#define DEPTH_VAL_Y				WATERPRESS_VAL_Y + 21
+
+#define MAXDEPTH_VAL_X			58
+#define MAXDEPTH_VAL_Y			MAXDEPTH_TXT_Y 
+
+#define TIME_VAL_X				12				//current time
+#define TIME_VAL_Y				0
+
+#define DATE_VAL_X				TIME_VAL_X + 46	//date
+#define DATE_VAL_Y				TIME_VAL_Y
+
+#define	RUNTIME_VAL_X			MAXDEPTH_VAL_X	//runtime [hh:][mm:]ss
+#define	RUNTIME_VAL_Y			RUNTIME_TXT_Y
+
+//units
+#define AIRTEMP_UN_X			MSRMNT_VAL_X + 76//degC		
+#define AIRTEMP_UN_Y			AIRTEMP_VAL_Y - 2
+
+#define AIRPRESS_UN_X			AIRTEMP_UN_X	//hPa
+#define AIRPRESS_UN_Y			AIRPRESS_VAL_Y
+
+#define WATERTEMP_UN_X			AIRTEMP_UN_X	//degC
+#define WATERTEMP_UN_Y			WATERTEMP_VAL_Y - 2
+
+#define	WATERPRESS_UN_X			AIRTEMP_UN_X	//bar
+#define WATERPRESS_UN_Y			WATERPRESS_VAL_Y
+
+#define	DEPTH_UN_X				AIRTEMP_UN_X	//m for depth
+#define	DEPTH_UN_Y				DEPTH_VAL_Y
+
+#define	MAXDEPTH_UN_X			AIRTEMP_UN_X	//m for max depth
+#define	MAXDEPTH_UN_Y			MAXDEPTH_VAL_Y
