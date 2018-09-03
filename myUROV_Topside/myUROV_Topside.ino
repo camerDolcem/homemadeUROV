@@ -77,6 +77,7 @@ bool dispStats = TRUE; //debug
 //commms watchdog updates
 uint32 Wdog_Timestamp =		0;		//topside controller
 bool Get_Wdog_Timestamp =	TRUE;
+bool Beep_Flag =			FALSE;	//to indicate that lost comms have already been reestablished
 
 //data updates
 uint32 Cycle_Timestamp =	0;		//used to compare other events against and for comms watchdog
@@ -93,9 +94,6 @@ bool Send_Flag =			TRUE;
 bool Send_Motors_Flag =		TRUE;
 bool Send_Lights_Flag =		TRUE;
 bool Send_Servo_Flag =		TRUE;
-
-//to indicate that lost comms have already been reestablished
-bool Beep_Flag = FALSE;
 
 //default values corresponding to joystick default position readings
 //movement
@@ -259,7 +257,7 @@ void dispAirTempPress()
 		air_temperature		= BMP.readTemperature() - 1.2;
 		air_pressure		= BMP.readPressure();
 	}
-	else	//try to locate lost sensor
+	else	//try to locate sensor not ready at startup (should not occur)
 	{
 		foundBmpSensor		= BMP.begin();
 		Wire.setClock(400000L); //change from default 100k to 400kHz clock speed for I2C

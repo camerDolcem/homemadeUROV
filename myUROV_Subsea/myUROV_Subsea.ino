@@ -22,23 +22,23 @@
  */
 
 //analogue input signals
-#define PIN_WATER_INGRESS	A0		//water detection sensor
-#define PIN_WATER_PRESSURE	A1		//pressure transducer
+#define PIN_WATER_INGRESS	A6		//water detection sensor
+#define PIN_WATER_PRESSURE	A0		//pressure transducer
 
 //light switch
-#define PIN_LIGHTS_SWITCH	8		//MOSFET driver
+#define PIN_LIGHTS_SWITCH	A4		//MOSFET driver
 
 //camera tilt servo control
 #define PIN_SERVO			9		
 
 //motors controls - 3DOF
-#define PIN_MOTORS_FB		5		//forward/backward
-#define PIN_MOTORS_LR		6		//yaw
-#define PIN_MOTORS_UD		7		//up/down (surface/dive)
+#define PIN_MOTORS_FB		7		//forward/backward
+#define PIN_MOTORS_LR		5		//yaw
+#define PIN_MOTORS_UD		6		//up/down (surface/dive)
 
 //comms
-#define PIN_RS485_MODE		12		//Rx/Tx select
-#define PIN_ONE_WIRE_BUS	11		//1-Wire bus	
+#define PIN_RS485_MODE		2		//Rx/Tx select
+#define PIN_ONE_WIRE_BUS	11		//1-Wire protocol	
 
 /*
 * global objects, flags and other vars
@@ -55,10 +55,26 @@ Servo MotorsFB;						//forward/backward
 Servo MotorsLR;						//left/right (yaw)
 Servo MotorsUD;						//up down (surface/dive)
 
+//comms buffers
+byte Incoming_Byte = 0;
+
+union WaterTemperatureImplicitCast	//water temperature storage and implicit conversion
+{
+	float As_Float;
+	byte As_Bytes[4];
+} WaterTemperaturePacket;
+
+union WaterPressureImplicitCast		//water pressure storage and implicit conversion
+{
+	float As_Float;
+	byte As_Bytes[4];
+} WaterPressurePacket;
+
 //commms watchdog updates
 uint32 Wdog_Timestamp =		0;
 bool Get_Wdog_Timestamp =	TRUE;
-
+bool NewData_Flag;					//if there is new incoming data, do not attempt to send packet to Topside
+					
 //safety mechanism updates
 bool Recovering_Flag =		FALSE;
 bool Stopped_Flag =			FALSE;
@@ -78,57 +94,35 @@ bool SendPacket_Flag =		TRUE;	//to send to surface controller
 uint32 Send_Timestamp =		0;
 
 //re-send commands
+bool SendCmd_Flag =			FALSE;
 bool Send_Motors_Cmd =		TRUE;
 bool Send_Lights_Cmd =		TRUE;
 bool Send_Servo_Cmd =		TRUE;
 
-//define byte to store single byte from the message
-byte Incoming_Byte = 0;
-
-//define the flags for sending the commands and for new data 
-bool SendCmd_Flag = FALSE;
-bool NewData_Flag;							//if there is new incoming data, do not attempt to send packet to Topside
-
-//define packet for water temperature value storage and type substitution
-union WaterTemperatureImplicitCast
-{
-	float As_Float;
-	byte As_Bytes[4];
-} WaterTemperaturePacket;
-
-
-//define packet for water pressure value storage and type substitution
-union WaterPressureImplicitCast
-{
-	float As_Float;
-	byte As_Bytes[4];
-} WaterPressurePacket;
-
-//define variable for water ingress level value storage
+//water ingress value 
 byte Water_Ingress_Storage;
+const byte Float_Size_In_Bytes = 4;
 
-const byte Float_Size_In_Bytes = 4;			//size of byte array to store float, constant value
-
-//define struct for received control messages 
+//struct for received control messages 
 struct
 {
-	byte X_MVMT = LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
-	byte Y_MVMT = FRWRD_BCKWRD_DEFAULT;		//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
-	byte Z_MVMT = 0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
+	byte X_MVMT =			LEFT_RIGHT_DEFAULT;		//0 - 128 -> left, 131 - center, 133 - 255 -> right
+	byte Y_MVMT =			FRWRD_BCKWRD_DEFAULT;	//0 - 122 -> bwd, 124 - center, 126 - 255 -> fwd
+	byte Z_MVMT =			0;						//0 - reset to default (zero speed), 1 - increase diving speed (or decrease surfacing speed)
 	//2 - do not change, 3 - increase surfacing speed (or decrease diving speed)
-	byte LIGHTS = 0;						//0 - lights OFF, 1 - lights ON
-	byte SERVO = 2;							//0 - reset to default (horizontal position), 1 - lower the position, 
+	byte LIGHTS =			0;						//0 - lights OFF, 1 - lights ON
+	byte SERVO =			2;						//0 - reset to default (horizontal position), 1 - lower the position, 
 	//2 - do not change, 3 - raise the position
 } controls;
 
-//define struct for mapped control messages into motion commands
+//struct for mapped control messages into commands
 struct
 {
-	uint16 X_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to turn left, 1485-2000us to turn right
-	uint16 Y_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to go bwd, 1485-2000us to go fwd
-	uint16 Z_PWM_CMD = PWM_CMD_DEFAULT;	//700-1285us to rise, 1485-2000us to dive
-	byte LIGHTS_CMD = 0;					//1 lights on, 0 lights off
-	byte SERVO_CMD = SERVO_CMD_DEFAULT;	//position of the servo in deg
+	uint16 X_PWM_CMD =		PWM_CMD_DEFAULT;	//700-1285us to turn left, 1485-2000us to turn right
+	uint16 Y_PWM_CMD =		PWM_CMD_DEFAULT;	//700-1285us to go bwd, 1485-2000us to go fwd
+	uint16 Z_PWM_CMD =		PWM_CMD_DEFAULT;	//700-1285us to rise, 1485-2000us to dive
+	byte LIGHTS_CMD =		0;					//1 lights on, 0 lights off
+	byte SERVO_CMD =		SERVO_CMD_DEFAULT;	//position of the servo in deg
 } commands;
 
 /*
@@ -185,7 +179,7 @@ float getWaterPressure()
 		{
 			waterPressureAnaRead[i] = analogRead(PIN_WATER_PRESSURE);
 			delay(1); //delay due to h/w limitations of the onboard ADC 
-			Serial.println(waterPressureAnaRead[i]); //debug
+			//Serial.println(waterPressureAnaRead[i]); //debug
 
 			if (waterPressureAnaRead[i] < 116) //reads up to 116 at 0.0m, see comment below
 			{
@@ -197,7 +191,7 @@ float getWaterPressure()
 
 	//make avg
 	waterPressureAnaVal = waterPressureAnaVal / samples;
-	Serial.print("waterPressureAnaVal: "); Serial.println(waterPressureAnaVal, 2); //debug
+	//Serial.print("waterPressureAnaVal: "); Serial.println(waterPressureAnaVal, 2); //debug
 
 	/*
 	 *	0.5 - 4.5V - sensor output value corresponding to:
@@ -207,16 +201,16 @@ float getWaterPressure()
 	 *	BUTT! Both sensor and Arduino ADC are inaccurate due to various reasons e.g. interferences in power supply.
 	 *	Sensor returns 0.52V at 0m (atmosphere, 1009hPa) and that is translated to anything between 106 and 116 counts.
 	 *	It is assumed that the sensor is perhaps calculating against lower than above ambient pressure (sealed type).
-	 *	1.2MPa / 819 counts = 1465.2014 Pa/count OR ~~~ 0.147m (14.7cm) / count
+	 *	1.2MPa / 819 counts = 1465.2014 Pa/count OR ~~~ 0.147m / count <==> 14.7cm / count 
 	 *	All the above approximations make this measurement quite inaccurate overall but should provide
 	 *	a good idea on an actual pressure/depth. 
 	 */
 
-	//now see how many counts 'beyond' 0 are we and turn it into Pascals
-	waterPressurePa = (waterPressureAnaVal - 116) * 1465.2014;
+	//now see how many counts beyond 0 there are and turn it into Pascals
+	waterPressurePa = (waterPressureAnaVal - 116.0) * 1465.2014;
 	//waterPressurePa = 1490.68323 * (waterPressurePa / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
 	
-	Serial.print("water pressure bar: "); Serial.println(waterPressurePa / 100000.0, 4);//debug
+	//Serial.print("water pressure bar: "); Serial.println(waterPressurePa / 100000.0, 4);//debug
 	
 	return waterPressurePa;		//in Pa
 }
@@ -280,6 +274,9 @@ void receiveTopsideJoystickData()
 					controls.X_MVMT = Incoming_Byte;
 
 					Get_Wdog_Timestamp = TRUE;
+				
+					//Serial.println("X MSG!"); //debug
+
 				}
 
 				else
@@ -295,6 +292,8 @@ void receiveTopsideJoystickData()
 					controls.Y_MVMT = Incoming_Byte;
 
 					Get_Wdog_Timestamp = TRUE;
+
+					//Serial.println("Y MSG!"); //debug
 				}
 					
 				else
@@ -311,6 +310,8 @@ void receiveTopsideJoystickData()
 
 					Get_Wdog_Timestamp = TRUE;
 
+					//Serial.println("Z MSG!"); //debug
+
 					//blink(1, 100); //debug
 				}
 				else
@@ -324,6 +325,8 @@ void receiveTopsideJoystickData()
 				if (Serial.read() == STOP_LIGHTS_MSG_ID)
 				{
 					controls.LIGHTS = Incoming_Byte;
+					//Serial.println("Lights MSG!"); //debug
+
 				}
 				else
 					{}	//corrupted packet - ignore
@@ -334,7 +337,10 @@ void receiveTopsideJoystickData()
 			{
 				Incoming_Byte = Serial.read();
 				if (Serial.read() == STOP_SERVO_MSG_ID)
+				{
 					controls.SERVO = Incoming_Byte;
+					//Serial.println("Servo MSG!"); //debug
+				}
 				else
 					{}	//corrupted packet - ignore
 			}
@@ -342,11 +348,11 @@ void receiveTopsideJoystickData()
 
 			default:	//corrupted packet		
 			{ 
-				//Serial.println("Corrupted packet!");
+				//Serial.println("Corrupted packet!"); //debug
 				//Serial.println("0");
-				blink(1, 25);
+				//blink(1, 50);
 			}
-				break;
+			break;
 		}//switch
 	}//while
 }
@@ -577,7 +583,8 @@ void safetyStop()
 		
 		Stopped_Flag = TRUE;
 
-		blink(1, 2000); //debug
+		//blink(1, 2000); //debug
+		//Serial.println("SAFETY STOP!!"); //debug
 	}
 }
 
@@ -685,9 +692,9 @@ void loop()
 	//Serial.print("Y = "); Serial.println(controls.Y_MVMT); 
 	//Serial.print("LIGHTS = "); Serial.println(controls.LIGHTS); 
 
-	//watchdog(Cycle_Timestamp); //TURN THIS ON AFTER TESTS 
+	watchdog(Cycle_Timestamp);
 
-	/*while (Serial.available())
+	/*while (Serial.available()) //debug
 	{
 		blink(1, 10);
 		Serial.read();
