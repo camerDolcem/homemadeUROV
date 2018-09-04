@@ -646,7 +646,7 @@ void loop()
 
 	receiveTopsideJoystickData();
 
-	if (SendCmd_Flag)
+	if (SendCmd_Flag && !Recovering_Flag)
 	{
 		processControls();
 		sendCommands();
