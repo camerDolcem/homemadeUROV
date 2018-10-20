@@ -22,11 +22,11 @@
  */
 
 //analogue input signals
-#define PIN_WATER_INGRESS	A6		//water detection sensor
+#define PIN_WATER_INGRESS	A7		//water detection sensor
 #define PIN_WATER_PRESSURE	A0		//pressure transducer
 
 //light switch
-#define PIN_LIGHTS_SWITCH	A4		//MOSFET driver
+#define PIN_LIGHTS_SWITCH	12		//MOSFET driver
 
 //camera tilt servo control
 #define PIN_SERVO			9		
@@ -157,10 +157,6 @@ byte getWaterIngress()
 	else
 		water_ingress = map(water_ingress_read, 200, 500, 5, 40);	//in range of 5 to 40mm 
 
-	//Serial.print("water ingress reading: "); Serial.println(water_ingress_read);//debug
-	//Serial.print("water ingress in mm: "); 
-	//Serial.print(water_ingress);//debug
-
 	return water_ingress;											//in mm
 }
 
@@ -179,7 +175,6 @@ float getWaterPressure()
 		{
 			waterPressureAnaRead[i] = analogRead(PIN_WATER_PRESSURE);
 			delay(1); //delay due to h/w limitations of the onboard ADC 
-			//Serial.println(waterPressureAnaRead[i]); //debug
 
 			if (waterPressureAnaRead[i] < 116) //reads up to 116 at 0.0m, see comment below
 			{
@@ -191,14 +186,13 @@ float getWaterPressure()
 
 	//make avg
 	waterPressureAnaVal = waterPressureAnaVal / samples;
-	//Serial.print("waterPressureAnaVal: "); Serial.println(waterPressureAnaVal, 2); //debug
 
 	/*
 	 *	0.5 - 4.5V - sensor output value corresponding to:
 	 *	0   - 1.2MPa which corresponds to (in Arduino):
-	 *	103 - 922 counts returned by ADC. That yields:
+	 *	103 - 922 counts returned by 10-bit ADC (0-1023). That yields:
 	 *	819 counts to be spread between 0 and 1.2MPa
-	 *	BUTT! Both sensor and Arduino ADC are inaccurate due to various reasons e.g. interferences in power supply.
+	 *	BUTT! Both sensor and Arduino ADC are inaccurate due to various reasons e.g. noise in power supply.
 	 *	Sensor returns 0.52V at 0m (atmosphere, 1009hPa) and that is translated to anything between 106 and 116 counts.
 	 *	It is assumed that the sensor is perhaps calculating against lower than above ambient pressure (sealed type).
 	 *	1.2MPa / 819 counts = 1465.2014 Pa/count OR ~~~ 0.147m / count <==> 14.7cm / count 
@@ -208,9 +202,8 @@ float getWaterPressure()
 
 	//now see how many counts beyond 0 there are and turn it into Pascals
 	waterPressurePa = (waterPressureAnaVal - 116.0) * 1465.2014;
-	//waterPressurePa = 1490.68323 * (waterPressurePa / samples) - 172919.25466;//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
-	
-	//Serial.print("water pressure bar: "); Serial.println(waterPressurePa / 100000.0, 4);//debug
+	//waterPressurePa = 1490.68323 * (waterPressurePa / samples) - 172919.25466;
+	//max measured water pressure is 12 000hPa or 1 200 000Pa according to sensor spec
 	
 	return waterPressurePa;		//in Pa
 }
@@ -274,9 +267,6 @@ void receiveTopsideJoystickData()
 					controls.X_MVMT = Incoming_Byte;
 
 					Get_Wdog_Timestamp = TRUE;
-				
-					//Serial.println("X MSG!"); //debug
-
 				}
 
 				else
@@ -292,8 +282,6 @@ void receiveTopsideJoystickData()
 					controls.Y_MVMT = Incoming_Byte;
 
 					Get_Wdog_Timestamp = TRUE;
-
-					//Serial.println("Y MSG!"); //debug
 				}
 					
 				else
@@ -309,10 +297,6 @@ void receiveTopsideJoystickData()
 					controls.Z_MVMT = Incoming_Byte;
 
 					Get_Wdog_Timestamp = TRUE;
-
-					//Serial.println("Z MSG!"); //debug
-
-					//blink(1, 100); //debug
 				}
 				else
 					{}	//corrupted packet - ignore
@@ -325,8 +309,6 @@ void receiveTopsideJoystickData()
 				if (Serial.read() == STOP_LIGHTS_MSG_ID)
 				{
 					controls.LIGHTS = Incoming_Byte;
-					//Serial.println("Lights MSG!"); //debug
-
 				}
 				else
 					{}	//corrupted packet - ignore
@@ -339,7 +321,6 @@ void receiveTopsideJoystickData()
 				if (Serial.read() == STOP_SERVO_MSG_ID)
 				{
 					controls.SERVO = Incoming_Byte;
-					//Serial.println("Servo MSG!"); //debug
 				}
 				else
 					{}	//corrupted packet - ignore
@@ -347,11 +328,7 @@ void receiveTopsideJoystickData()
 			break;			
 
 			default:	//corrupted packet		
-			{ 
-				//Serial.println("Corrupted packet!"); //debug
-				//Serial.println("0");
-				//blink(1, 50);
-			}
+			{ }
 			break;
 		}//switch
 	}//while
@@ -582,9 +559,6 @@ void safetyStop()
 		sendCommands();
 		
 		Stopped_Flag = TRUE;
-
-		//blink(1, 2000); //debug
-		//Serial.println("SAFETY STOP!!"); //debug
 	}
 }
 
@@ -684,20 +658,5 @@ void loop()
 		}
 	}
 
-	//joystick stuff//////////////
-
-	//Serial.print("UP = ");  Serial.print(controls.Z1_MVMT); Serial.print("\t");
-	//Serial.print("DOWN = "); Serial.println(controls.Z2_MVMT);
-	//Serial.print("X = "); Serial.print(controls.X_MVMT);  Serial.print("\t"); 
-	//Serial.print("Y = "); Serial.println(controls.Y_MVMT); 
-	//Serial.print("LIGHTS = "); Serial.println(controls.LIGHTS); 
-
 	watchdog(Cycle_Timestamp);
-
-	/*while (Serial.available()) //debug
-	{
-		blink(1, 10);
-		Serial.read();
-	}*/
-
 } //loop

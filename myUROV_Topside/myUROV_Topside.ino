@@ -1,6 +1,6 @@
 /***********************************************************************************
 	Name:
-		myUROV_Subsea.ino
+		myUROV_Topside.ino
 	Description:
 		Topside (surface) controller functionality implementation.
 	Version:
@@ -23,33 +23,33 @@
  */
 
 //joystick controls							//device interface pins
-#define PIN_BUTTON_UP			A5			//A
+#define PIN_BUTTON_UP			12			//A
 #define PIN_BUTTON_DOWN			A3			//C
 #define PIN_BUTTON_LIGHTS		A0			//F
-#define PIN_BUTTON_SERVO_UP		A4			//B
+#define PIN_BUTTON_SERVO_UP		6			//B
 #define PIN_BUTTON_SERVO_DOWN	A2			//D
 #define PIN_BUTTON_SERVO_RESET	A1			//E
 
 #define PIN_JOYSTICK_X			A6			//X
 #define PIN_JOYSTICK_Y			A7			//Y
-#define PIN_JOYSTICK_BUTTON		A8			//K
+#define PIN_JOYSTICK_BUTTON		2//A8		//K
 
 //LEDs 
-#define PIN_LED_POWER_SUPPLY	7
-#define PIN_LED_LEAK_ALARM		6
-#define PIN_LED_TX				5
-#define PIN_LED_RX				4
+//#define PIN_LED_POWER_SUPPLY	7
+#define PIN_LED_LEAK_ALARM		3//6
+#define PIN_LED_TX				4//5
+#define PIN_LED_RX				5//4
 
 //buzzer 
-#define PIN_BUZZER_LEAK_ALARM	3
+//#define PIN_BUZZER_LEAK_ALARM	6//3
 
 //board-to-board comms
-#define PIN_RS485_MODE			2			 //Rx/Tx select
+#define PIN_RS485_MODE			7//2		//Rx/Tx select
 
 //LCD										//device interface pins (LCD)
-#define PIN_SS					53			//CS (Chip (aka Slave) Select)
-#define PIN_MISO				50			//RESET
-#define PIN_DC					48			//A0 (Data/Command select)
+#define PIN_SS					10//53		//CS (Chip (aka Slave) Select)
+#define PIN_MISO				9//50		//RESET
+#define PIN_DC					8//48		//A0 (Data/Command select)
 //hardware pin SCK (Serial Clock) 			//SCK (SPI Clock input)	
 //hardware pin MOSI (Master Out Slave In)  	//SDA (SPI Data input)
 
@@ -69,10 +69,12 @@ byte Received_Packet[] =	{ 0, 0, 0, 0, 0, 0, 0, 0, 0 }; //Rx msg max size is 9by
 byte Incoming_Frame[] =		{ 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 byte Incoming_Byte =		0;
 
-uint32 Rx_Good =	0; //debug
-uint32 Rx_Incomplete = 0; //debug
-uint32 Rx_Rubbish = 0; //debug
-bool dispStats = TRUE; //debug
+/* DEBUG - for comms stats only
+uint32 Rx_Good =	0; 
+uint32 Rx_Incomplete = 0; 
+uint32 Rx_Rubbish = 0; 
+bool dispStats = TRUE; 
+*/
 
 //commms watchdog updates
 uint32 Wdog_Timestamp =		0;		//topside controller
@@ -294,7 +296,7 @@ void dispWaterTempPressDpth()
 	float waterTemperature =	*(float *)(Received_Packet + 0);
 	float waterPressurePa =		*(float *)(Received_Packet + 4);
 	float waterPressureBar =	waterPressurePa / 100000.0;		//Pa to bar
-	float waterDepth =			waterPressurePa / (RHO * G);		//Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
+	float waterDepth =			waterPressurePa / (RHO * G);	//Pgauge[Pa] / (rho[kg/m^3] * g[m/s^2])
 	
 	float tempMaxWaterDepth =	0.0;
 	static float maxWaterDepth = 0.0;
@@ -320,7 +322,7 @@ void dispWaterTempPressDpth()
 	tempMaxWaterDepth = min(lastVals[0], lastVals[1]);
 	tempMaxWaterDepth = min(tempMaxWaterDepth, lastVals[2]);	//that is the 'min' max depth from last 3 readings
 
-	maxWaterDepth =		max(tempMaxWaterDepth, maxWaterDepth);		//update actual max recorded depth
+	maxWaterDepth =		max(tempMaxWaterDepth, maxWaterDepth);	//update actual max recorded depth
 
 	if (index < 2)
 	{
@@ -358,85 +360,77 @@ void eraseWaterTempPressDpth()
 //receive water pressure, temperature and leak level data
 void receiveSubseaTelemetryData()
 {
-	while (Serial3.available() >= 6)		//6 bytes defines biggest msg - float (1+4+1)
+	while (Serial.available() >= 6)		//6 bytes defines biggest msg - float (1+4+1)
 	{	
 		digitalWrite(PIN_LED_RX, HIGH);		//receive LED on
 
 		//process Rx buffer
-		Incoming_Byte = Serial3.read();
+		Incoming_Byte = Serial.read();
 
 		switch (Incoming_Byte)
 			{
 				case START_WATERTEMP_MSG_ID:
 				{
-					Serial3.readBytes((char *)(Incoming_Frame + 0), 4); //cast to make compiler stop to complain
-					if (Serial3.read() == STOP_WATERTEMP_MSG_ID)
+					Serial.readBytes((char *)(Incoming_Frame + 0), 4); //cast to make compiler stop to complain
+					if (Serial.read() == STOP_WATERTEMP_MSG_ID)
 					{
 						for (byte i = 0; i < 4; i++)
 							Received_Packet[i] = Incoming_Frame[i];
 
-						Rx_Good++; //debug
+						//Rx_Good++; //debug
 					}
 
 					else	//corrupted packet - ignore
 					{
-						//beep(1, 100); Serial3.println("Corrupted packet TEMP"); //debug
-						Rx_Incomplete++; //debug
-						dispStats = TRUE; //debug
+						//Rx_Incomplete++; //debug
+						//dispStats = TRUE; //debug
 					}	
 				}
 				break;
 							
 				case START_WATERPRESS_MSG_ID:
 				{
-					Serial3.readBytes((char *)(Incoming_Frame + 4), 4);
-					if (Serial3.read() == STOP_WATERPRESS_MSG_ID)
+					Serial.readBytes((char *)(Incoming_Frame + 4), 4);
+					if (Serial.read() == STOP_WATERPRESS_MSG_ID)
 					{
 						for (byte i = 4; i < 8; i++)
 							Received_Packet[i] = Incoming_Frame[i];
 
-						Rx_Good++; //debug
-
+						//Rx_Good++; //debug
 					}
 
 					else	//corrupted packet - ignore
 					{
-						//beep(1, 100); Serial3.println("Corrupted packet PRESS");
-						Rx_Incomplete++; //debug
-						dispStats = TRUE; //debug
+						//Rx_Incomplete++; //debug
+						//dispStats = TRUE; //debug
 					}	
 				}
 				break;
 
 				case START_WATERING_MSG_ID:
 				{
-					Incoming_Frame[8] = Serial3.read();
-					if (Serial3.read() == STOP_WATERING_MSG_ID)
+					Incoming_Frame[8] = Serial.read();
+					if (Serial.read() == STOP_WATERING_MSG_ID)
 					{
 						Received_Packet[8] = Incoming_Frame[8];
 
-						//Serial.println("Water ingress received OK"); //debug
 						//when water ingress info is received, kick the watchdog
 						Get_Wdog_Timestamp = TRUE;
-						Rx_Good++; //debug
+						//Rx_Good++; //debug
 					}
 
 					else
 					{
-						//beep(1, 100); Serial3.println("Corrupted packet INGRESS");
-						Rx_Incomplete++; //debug
-						dispStats = TRUE; //debug
+						//Rx_Incomplete++; //debug
+						//dispStats = TRUE; //debug
 					}	//corrupted packet - ignore 
 				}
 				break;
 
 				default:	//corrupted packet								
 				{
-					//beep(1, 25); //debug
-					//Serial3.print("Corrupted packet, buffer: ");
-					//Serial3.println(Serial3.available()); 
-					Rx_Rubbish++; //debug
-					dispStats = TRUE; //debug
+					//Rx_Rubbish++; //debug
+					//dispStats = TRUE; //debug
 				}
 				break;
 			
@@ -459,14 +453,14 @@ void checkWaterLeak()
 	{
 		//lit the alarm LED but do not buzz
 		digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
-		analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+		//analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
 	}
 
 	else if (Water_Ingress_Alarm >= 3)						//that indicates probable leak
 	{
 		//lit the alarm LED and make noise
 		digitalWrite(PIN_LED_LEAK_ALARM, HIGH);
-		analogWrite(PIN_BUZZER_LEAK_ALARM, 200);
+		//analogWrite(PIN_BUZZER_LEAK_ALARM, 200);
 
 		//display "LEAK!!!" alarm
 		if (displayedAlarm == FALSE)
@@ -482,7 +476,7 @@ void checkWaterLeak()
 	else
 	{
 		digitalWrite(PIN_LED_LEAK_ALARM, LOW);
-		analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+		//analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
 	}
 
 	if (Water_Ingress_Alarm < 3 && displayedAlarm == TRUE)	//erase alarm txt
@@ -658,19 +652,19 @@ void sendControlsToSubsea(const byte LeftRightArg, const byte FwdBwdArg, const b
 	if (Send_Motors_Flag || Send_Flag)					//send movement related data
 	{
 		//send Forward/Backword motion data
-		Serial3.write(START_X_MSG_ID);
-		Serial3.write(LeftRightArg);
-		Serial3.write(STOP_X_MSG_ID);
+		Serial.write(START_X_MSG_ID);
+		Serial.write(LeftRightArg);
+		Serial.write(STOP_X_MSG_ID);
 
 		//send Left/Right motion data
-		Serial3.write(START_Y_MSG_ID);
-		Serial3.write(FwdBwdArg);
-		Serial3.write(STOP_Y_MSG_ID);
+		Serial.write(START_Y_MSG_ID);
+		Serial.write(FwdBwdArg);
+		Serial.write(STOP_Y_MSG_ID);
 
 		//send Up/Down motion data
-		Serial3.write(START_Z_MSG_ID);
-		Serial3.write(UpDownArg);
-		Serial3.write(STOP_Z_MSG_ID);
+		Serial.write(START_Z_MSG_ID);
+		Serial.write(UpDownArg);
+		Serial.write(STOP_Z_MSG_ID);
 
 		Send_Motors_Flag = FALSE;
 		Send_Flag = FALSE;
@@ -680,18 +674,18 @@ void sendControlsToSubsea(const byte LeftRightArg, const byte FwdBwdArg, const b
 
 	if (Send_Lights_Flag)					//send lights on/off data
 	{
-		Serial3.write(START_LIGHTS_MSG_ID);
-		Serial3.write(LightsArg);
-		Serial3.write(STOP_LIGHTS_MSG_ID);
+		Serial.write(START_LIGHTS_MSG_ID);
+		Serial.write(LightsArg);
+		Serial.write(STOP_LIGHTS_MSG_ID);
 
 		Send_Lights_Flag = FALSE;
 	}
 
 	if (Send_Servo_Flag)					//send servo positioning data
 	{
-		Serial3.write(START_SERVO_MSG_ID);
-		Serial3.write(ServoArg);
-		Serial3.write(STOP_SERVO_MSG_ID);
+		Serial.write(START_SERVO_MSG_ID);
+		Serial.write(ServoArg);
+		Serial.write(STOP_SERVO_MSG_ID);
 
 		Send_Servo_Flag = FALSE;
 	}
@@ -708,9 +702,11 @@ void beep(byte tuple, uint16 beepspan)
 {
 	for (byte i = 0; i < tuple; i++)
 	{
-		analogWrite(PIN_BUZZER_LEAK_ALARM, 100);
+		//analogWrite(PIN_BUZZER_LEAK_ALARM, 100);
+		analogWrite(PIN_LED_LEAK_ALARM, 100);
 		delay(beepspan);
-		analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+		//analogWrite(PIN_BUZZER_LEAK_ALARM, 0);
+		analogWrite(PIN_LED_LEAK_ALARM, 0);
 		delay(beepspan);
 	}
 }
@@ -803,22 +799,22 @@ void setup()
 	//display runtime related static text
 	MyTFT.setTextColor(ST7735_AQUA);
 	MyTFT.setCursor(RUNTIME_TXT_X, RUNTIME_TXT_Y);
-	MyTFT.print(F("Run-time:"));
+	MyTFT.print(F("Run time:"));
 	/*MyTFT.setTextColor(0x2e8b);
 	MyTFT.setCursor(RUNTIME_H_X, RUNTIME_Y);
 	MyTFT.print(F("h"));
 	MyTFT.setCursor(RUNTIME_M_X, RUNTIME_Y);
 	MyTFT.print(F("m"));
-	MyTFT.setCursor(RUNTIME_S_X, RUNTIME_Y);
-	MyTFT.print(F("s"));*/
+	MyTFT.setCursor(RUNTIME_S_X, RUNTIME_Y); 
+	MyTFT.print(F("s")); */
 
 	//display 'Max:'
 	MyTFT.setTextColor(ST7735_BLUE);
 	MyTFT.setCursor(MAXDEPTH_TXT_X, MAXDEPTH_TXT_Y);
-	MyTFT.print(F("Max dpth:"));
+	MyTFT.print(F("Max dpth:")); 
 
 	//set LED pins to output
-	pinMode(PIN_LED_POWER_SUPPLY, OUTPUT);
+	//pinMode(PIN_LED_POWER_SUPPLY, OUTPUT);
 	pinMode(PIN_LED_LEAK_ALARM, OUTPUT);
 	pinMode(PIN_LED_TX, OUTPUT);
 	pinMode(PIN_LED_RX, OUTPUT);
@@ -850,11 +846,10 @@ void setup()
 
 	//RS485
 	pinMode(PIN_RS485_MODE, OUTPUT);			//DE/RE Data Enable/Receive Enable transmit/receive pin of RS-485
-	Serial3.begin(BITRATE, SERIAL_SETTINGS);	//open Serial Port for RS485 comms
-	Serial.begin(BITRATE);						//open Serial Port for RS485 comms
+	Serial.begin(BITRATE, SERIAL_SETTINGS);	//open Serial Port for RS485 comms
 
 	//light Power Supply LED
-	digitalWrite(PIN_LED_POWER_SUPPLY, HIGH);
+	//digitalWrite(PIN_LED_POWER_SUPPLY, HIGH);
 }//end of setup
 
 
@@ -893,7 +888,7 @@ void loop()
 	if (Time_Flag)
 	{
 		eraseTime();						
-		dispTime();							
+		dispTime();		
 			
 		Time_Timestamp = millis();			
 		Time_Flag = FALSE;					
@@ -928,48 +923,15 @@ void loop()
 
 	watchdog(Cycle_Timestamp);
 
-	//joystick stuff//////////////
-	//uint16 butup = digitalRead(PIN_BUTTON_UP);
-	//uint16 butdown = digitalRead(PIN_BUTTON_DOWN);
-	//uint16 butsdown = digitalRead(PIN_BUTTON_SERVO_DOWN);
-	//uint16 butsup = digitalRead(PIN_BUTTON_SERVO_UP);
-	//uint16 butsres = digitalRead(PIN_BUTTON_SERVO_RESET);
-	//uint16 butsurface = digitalRead(PIN_JOYSTICK_Z);
-
-	//Serial3.print("UP = ");  Serial3.print(Up_Button_Motion); Serial3.print("\t");
-	//Serial3.print("DOWN = "); Serial3.println(Down_Button_Motion); 
-	//if (Left_Right_Joystick_Motion != 131 || Forward_Backward_Joystick_Motion != 124)
-	//{
-	//	Serial3.print("X = "); Serial3.print(Left_Right_Joystick_Motion); Serial3.print("\t");
-	//	Serial3.print("Y = "); Serial3.println(Forward_Backward_Joystick_Motion);
-	//}
-	//Serial3.print("SERVO DOWN = "); Serial3.print(butsdown); Serial3.print("\t");
-	//Serial3.print("SERVO UP = "); Serial3.println(butsup);
-	//Serial3.print("SERVO RESET = "); Serial3.println(butsres);
-	//Serial3.print("SURFACE (Z) = "); Serial3.println(butsurface);
-	//delay(500);
-
-	//Serial3.println("WTF");
-
-	//beep(1, 750);
-
-	//DEBUG:
+	/*DEBUG - display comms stats:
 	if (dispStats == true)
 	{
-		
 		Serial.print("Rx GOOD: "); Serial.print(Rx_Good);
 		Serial.print(" Rx Incomplete: "); Serial.print(Rx_Incomplete);
 		Serial.print(" Rx Corrupted: "); Serial.println(Rx_Rubbish);
 		Serial.print("Rx GOOD : Rx BAD  "); Serial.print(Rx_Good / (Rx_Incomplete + Rx_Rubbish)); Serial.print(":");
 		Serial.println(1);
 		dispStats = false;
-	}
-
-	//debug
-	/*while (Serial3.available())
-	{
-		Serial.println(Serial3.read());
-		
-	}*/
+	} */
 
 }//loop
